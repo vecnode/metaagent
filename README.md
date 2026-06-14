@@ -2,7 +2,14 @@
 
 Portable C++17 core for MetaAgent: **particle pattern mechanics**, **camera rig math**, **media/mask pipeline**, **HTTP (inbound + outbound)**, **session + command validation**, and **input policy**. No Unreal headers.
 
-Full design notes: [`ARCHITECTURE.md`](./ARCHITECTURE.md).
+Full design notes: `[ARCHITECTURE.md](./ARCHITECTURE.md)`.
+
+```sh
+cmake -S . -B build
+cmake --build build
+ctest --test-dir build
+```
+
 
 ## What this library is
 
@@ -42,6 +49,8 @@ flowchart TB
     Net --> Bridge
 ```
 
+
+
 ## Layout
 
 ```
@@ -59,39 +68,45 @@ Embed elsewhere: add `metaagent/include`, compile `metaagent.cpp` once (the UE p
 
 ## Portable modules
 
-| Namespace | Responsibility |
-|-----------|----------------|
+
+| Namespace             | Responsibility                                                                                                              |
+| --------------------- | --------------------------------------------------------------------------------------------------------------------------- |
 | `metaagent::particle` | FSM, scheduler, forming/return solvers, actuation compose, shape/mask, state effects, effect catalog, **visual continuity** |
-| `metaagent::camera` | Zoom, cinematic orbit pose, sway, `SlowOrbit`, `CameraController` |
-| `metaagent::media` | PNG/JPEG decode, mask pipeline, thumbnails |
-| `metaagent::net` | Router, inbound handlers, `platform_client` (outbound) |
-| `metaagent::session` | `RuntimeSession`, feature flags, status text |
-| `metaagent::app` | Command parse/validate, GUI panel catalog, GUI action validation |
-| `metaagent::runtime` | Host service callbacks (recording, AI) + **ParticleHostCallbacks** |
-| `metaagent::input` | GUI-open vs observation-mode input policy |
+| `metaagent::camera`   | Zoom, cinematic orbit pose, sway, `SlowOrbit`, `CameraController`                                                           |
+| `metaagent::media`    | PNG/JPEG decode, mask pipeline, thumbnails                                                                                  |
+| `metaagent::net`      | Router, inbound handlers, `platform_client` (outbound)                                                                      |
+| `metaagent::session`  | `RuntimeSession`, feature flags, status text                                                                                |
+| `metaagent::app`      | Command parse/validate, GUI panel catalog, GUI action validation                                                            |
+| `metaagent::runtime`  | Host service callbacks (recording, AI) + **ParticleHostCallbacks**                                                          |
+| `metaagent::input`    | GUI-open vs observation-mode input policy                                                                                   |
+
 
 ## Host integration contract (particles)
 
-The scheduler is **callback-driven**. The host implements `SchedulerCallbacks` and optional **`particle_host`** (`ParticleHostCallbacks`):
+The scheduler is **callback-driven**. The host implements `SchedulerCallbacks` and optional `**particle_host`** (`ParticleHostCallbacks`):
 
-| Callback | Host responsibility |
-|----------|---------------------|
-| `build_pattern_targets` | Shape providers, async mask cache, sync runtime → core |
-| `begin_pattern_start` | Set active config/tags (displayed pose frozen by core before call) |
-| `enter_pattern_state` | Sync core ↔ runtime, optional side effects |
-| `complete_pattern_run` | Reset runtime, re-seed idle baseline |
-| `particle_host.read_displayed_positions` | Return on-screen positions (compose + state-effect offsets) |
-| `particle_host.apply_world_positions` | Push frozen pose to runtime/GPU buffers |
-| `particle_host.authoritative_particle_count` | Live particle count for baseline/mask validation |
 
-**Visual continuity:** on each FSM transition, the scheduler reads the **displayed** pose via `particle_host`, then `apply_visual_continuity_for_transition()` / `freeze_displayed_pose()` updates baseline and targets. See [`particle/visual_continuity.hpp`](./include/metaagent/particle/visual_continuity.hpp) and [`ARCHITECTURE.md`](./ARCHITECTURE.md#visual-continuity).
+| Callback                                     | Host responsibility                                                |
+| -------------------------------------------- | ------------------------------------------------------------------ |
+| `build_pattern_targets`                      | Shape providers, async mask cache, sync runtime → core             |
+| `begin_pattern_start`                        | Set active config/tags (displayed pose frozen by core before call) |
+| `enter_pattern_state`                        | Sync core ↔ runtime, optional side effects                         |
+| `complete_pattern_run`                       | Reset runtime, re-seed idle baseline                               |
+| `particle_host.read_displayed_positions`     | Return on-screen positions (compose + state-effect offsets)        |
+| `particle_host.apply_world_positions`        | Push frozen pose to runtime/GPU buffers                            |
+| `particle_host.authoritative_particle_count` | Live particle count for baseline/mask validation                   |
+
+
+**Visual continuity:** on each FSM transition, the scheduler reads the **displayed** pose via `particle_host`, then `apply_visual_continuity_for_transition()` / `freeze_displayed_pose()` updates baseline and targets. See `[particle/visual_continuity.hpp](./include/metaagent/particle/visual_continuity.hpp)` and `[ARCHITECTURE.md](./ARCHITECTURE.md#visual-continuity)`.
 
 ## HTTP
 
-| Direction | Core | UE host |
-|-----------|------|---------|
-| **Inbound** | `net/handlers`, `net/router` | `FMetaAgentHttpBridge` |
-| **Outbound** | `net/platform_client` | `FMetaAgentPlatformBridge` |
+
+| Direction    | Core                         | UE host                    |
+| ------------ | ---------------------------- | -------------------------- |
+| **Inbound**  | `net/handlers`, `net/router` | `FMetaAgentHttpBridge`     |
+| **Outbound** | `net/platform_client`        | `FMetaAgentPlatformBridge` |
+
 
 ## Standalone build
 
@@ -113,16 +128,18 @@ cmake --build build --target metaagent_server
 
 The UE plugin embeds this library via `Source/MetaAgentPlugin/MetaAgentCoreAggregate.cpp`.
 
-| Adapter | Role |
-|---------|------|
-| `MetaAgentTypeBridge` | UE ↔ core conversion, scheduler bridge, camera sync |
-| `UMetaAgentParticleRuntime` | Tick glue, Niagara actuation, **ReadDisplayedPose / ApplyHostWorldPositions** |
-| `UMetaAgentParticleControl` | Orchestrator, representation drivers |
-| `Host/MetaAgentHttpBridge` | Inbound HTTPServer |
-| `Host/MetaAgentPlatformBridge` | Outbound platform POST |
-| `Host/MetaAgentHostSession` | Session snapshot for validation |
-| `Host/MetaAgentInputBridge` | Command / GUI validation |
-| `Host/MetaAgentHostServicesBridge` | Recording + AI `HostServiceCallbacks` |
+
+| Adapter                            | Role                                                                          |
+| ---------------------------------- | ----------------------------------------------------------------------------- |
+| `MetaAgentTypeBridge`              | UE ↔ core conversion, scheduler bridge, camera sync                           |
+| `UMetaAgentParticleRuntime`        | Tick glue, Niagara actuation, **ReadDisplayedPose / ApplyHostWorldPositions** |
+| `UMetaAgentParticleControl`        | Orchestrator, representation drivers                                          |
+| `Host/MetaAgentHttpBridge`         | Inbound HTTPServer                                                            |
+| `Host/MetaAgentPlatformBridge`     | Outbound platform POST                                                        |
+| `Host/MetaAgentHostSession`        | Session snapshot for validation                                               |
+| `Host/MetaAgentInputBridge`        | Command / GUI validation                                                      |
+| `Host/MetaAgentHostServicesBridge` | Recording + AI `HostServiceCallbacks`                                         |
+
 
 Tick paths:
 
@@ -152,7 +169,7 @@ int main() {
 3. **Extend session snapshot** — expose pattern state + particle count on `/health`.
 4. **More continuity edges in `visual_continuity_test`** — Anticipating, Dissipating, auto-mode transitions.
 
-Details: [`ARCHITECTURE.md`](./ARCHITECTURE.md#roadmap).
+Details: `[ARCHITECTURE.md](./ARCHITECTURE.md#roadmap)`.
 
 ### Recently completed
 
@@ -160,3 +177,4 @@ Details: [`ARCHITECTURE.md`](./ARCHITECTURE.md#roadmap).
 - `ParticleHostCallbacks` on `SchedulerCallbacks::particle_host`
 - `visual_continuity_test`, `HostServiceCallbacks` query helpers
 - UE: host read/apply only; `MetaAgentHostServicesBridge`; AI + Recording GUI catalog rows
+
