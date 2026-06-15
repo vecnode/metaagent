@@ -51,6 +51,17 @@ Testing/
 Thumbs.db
 desktop.ini
 
+# MetaAgent desktop app (app/) — generated / local build artifacts
+app/build/
+app/out/
+app/_deps/
+app/**/WebAssets.h
+app/**/MetaAgentWebAssets.h
+build-msvc/
+**/WebView2Loader.dll
+**/WebView2Runtime/
+Desktop/Release/
+
 # Local env / secrets (server config, API keys)
 .env
 .env.*

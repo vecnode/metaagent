@@ -106,6 +106,11 @@ if(WIN32)
     target_link_libraries(metaagent_server PRIVATE ws2_32)
 endif()
 
+option(METAAGENT_BUILD_APP "Build the MetaAgent desktop webview application (app/)" OFF)
+if(METAAGENT_BUILD_APP)
+    add_subdirectory(app)
+endif()
+
 install(TARGETS metaagent
     EXPORT metaagentTargets
     ARCHIVE DESTINATION lib

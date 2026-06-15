@@ -2,133 +2,228 @@
 
 Portable C++17 core for MetaAgent: **particle pattern mechanics**, **camera rig math**, **media/mask pipeline**, **HTTP (inbound + outbound)**, **session + command validation**, and **input policy**. No Unreal headers.
 
-Full design notes: `[ARCHITECTURE.md](./ARCHITECTURE.md)`.
+The **primary standalone host** is the desktop app in [`app/`](./app/) (WebView + embedded HTTP server). The Unreal Engine plugin embeds the same library unchanged via `MetaAgentCoreAggregate.cpp`.
 
-## Build Standalone
+Full design notes: [`ARCHITECTURE.md`](./ARCHITECTURE.md).
+
+## Build library + tests
+
+From the repository root (`metaagent/`):
 
 ```sh
-cd metaagent
 cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
 cmake --build build
 ctest --test-dir build
 ```
 
-## Headless HTTP Server
+This builds the static library, unit tests, and `metaagent_server` (headless CLI). It does **not** build the desktop app unless you pass `-DMETAAGENT_BUILD_APP=ON`.
+
+---
+
+## MetaAgent desktop app (`app/`)
+
+WebView shell with an embedded local HTTP server, control-panel UI, mock particle runtime, and the same portable HTTP handlers as the headless server. Based on the [webview-boost-app](https://github.com/vecnode/webview-boost-app) template.
+
+### Prerequisites
+
+| Platform | Required |
+|----------|----------|
+| All | CMake 3.20+, Git, internet on **first** configure |
+| Windows | **Visual Studio 2022** (MSVC x64) — MinGW/MSYS2 will not work |
+| Windows | [WebView2 Runtime](https://developer.microsoft.com/microsoft-edge/webview2/) installed |
+| Linux | GCC/Clang with C++20, GTK 3 + WebKit2GTK dev packages |
+
+On first configure, CMake downloads dependencies via FetchContent (httplib, webview, Boost.Asio, cpp-embedlib). On Windows they are cached under `%LOCALAPPDATA%\metaagent-app-deps` to avoid long-path issues inside Unreal plugin folders.
+
+### Compile the app
+
+Enable the app with `-DMETAAGENT_BUILD_APP=ON`. CMake target: **`metaagent-app`**.
+
+#### Windows (recommended)
+
+Open **x64 Native Tools Command Prompt for VS 2022** (or any shell where `cl.exe` is MSVC, not MinGW), then:
+
+```powershell
+cd metaagent
+
+# 1) Configure (once, or after CMakeLists changes)
+cmake -B build-msvc -G "Visual Studio 17 2022" -A x64 -DMETAAGENT_BUILD_APP=ON
+
+# 2) Compile Debug
+cmake --build build-msvc --target metaagent-app --config Debug -j
+
+# 3) Run
+.\build-msvc\app\Debug\metaagent-app.exe
+```
+
+**Release build:**
+
+```powershell
+cmake --build build-msvc --target metaagent-app --config Release -j
+.\build-msvc\app\Release\metaagent-app.exe
+```
+
+**Compile + run in one step** (finds VS, configures `build-msvc`, builds Debug, launches):
+
+```powershell
+.\app\build_and_run.bat
+```
+
+Clean reconfigure:
+
+```powershell
+.\app\build_and_run.bat --clean
+```
+
+**Output locations (Windows)**
+
+| Config | Executable |
+|--------|------------|
+| Debug | `build-msvc\app\Debug\metaagent-app.exe` |
+| Release | `build-msvc\app\Release\metaagent-app.exe` |
+
+Post-build copies `WebView2Loader.dll` next to the `.exe` when the WebView2 SDK is present.
+
+#### Linux
+
+```sh
+cd metaagent
+
+cmake -B build -DMETAAGENT_BUILD_APP=ON -DCMAKE_BUILD_TYPE=Release
+cmake --build build --target metaagent-app -j
+./build/metaagent-app
+```
+
+Or compile and run:
+
+```sh
+./app/build_and_run.sh
+```
+
+**Output:** `build/metaagent-app`
+
+#### Compile app + library together
+
+You can use one build tree for tests, server, and app:
+
+```powershell
+# Windows (MSVC)
+cmake -B build-msvc -G "Visual Studio 17 2022" -A x64 -DMETAAGENT_BUILD_APP=ON
+cmake --build build-msvc --config Debug -j          # builds everything
+cmake --build build-msvc --target metaagent-app --config Debug -j   # app only
+```
+
+```sh
+# Linux
+cmake -B build -DMETAAGENT_BUILD_APP=ON -DCMAKE_BUILD_TYPE=Release
+cmake --build build -j
+ctest --test-dir build
+```
+
+The app binds `127.0.0.1` on an ephemeral port, serves embedded UI from `app/public/`, and mounts the metaagent route table on the same server.
+
+### Desktop app HTTP routes
+
+| Method | Route | Description |
+|--------|-------|-------------|
+| `GET` | `/health` | Liveness + session snapshot (portable handler) |
+| `GET` / `POST` | `/echo` | Echo query/body |
+| `POST` | `/notify` | Ingest notify event; optional forward to UE via platform URL |
+| `POST` | `/ai/chat` | Ollama chat via `LanguageAiRuntime` |
+| `GET` | `/api/status` | Host status: pattern FSM, particle count, toggles |
+| `GET` | `/api/config` | Effective host configuration |
+| `GET` | `/api/gui/catalog` | Portable GUI panel catalog |
+| `GET` | `/api/notify/log` | Recent notify messages |
+| `POST` | `/api/command` | Dispatch validated command (`{"command":"pattern_step_forward"}`) |
+
+Static assets (`/`, `/style.css`, `/app.js`) are embedded in the executable.
+
+### Environment variables
+
+| Variable | Default | Purpose |
+|----------|---------|---------|
+| `METAAGENT_NO_AI` | off | Set to `1` to disable `/ai/chat` |
+| `METAAGENT_OLLAMA_URL` | `http://127.0.0.1:11434` | Ollama base URL |
+| `METAAGENT_OLLAMA_MODEL` | `llama3.2` | Ollama model name |
+| `METAAGENT_SYSTEM_PROMPT` | built-in | System prompt for AI |
+| `METAAGENT_PLATFORM_URL` | empty | Forward `/notify` to UE or external orchestrator |
+| `METAAGENT_PLATFORM_EVENT_ENDPOINT` | `/api/unreal/event` | Path appended to platform URL |
+
+Example — desktop app controlling a UE plugin instance that listens on port 8080:
+
+```powershell
+$env:METAAGENT_PLATFORM_URL = "http://127.0.0.1:8080"
+.\build-msvc\app\Debug\metaagent-app.exe
+```
+
+## Headless HTTP server (`tools/`)
+
+Minimal CLI without UI — useful for CI and scripting:
 
 ```sh
 ./build/metaagent_server.exe --port 8080
 ```
 
-## API
+## Shared HTTP API (library handlers)
 
-Start the headless server, then call these routes with `curl` or any HTTP client. No Unreal Engine required.
+Both `metaagent-app` and `metaagent_server` expose these portable routes:
 
 | Method | Route | Description |
 |--------|-------|-------------|
 | `GET` | `/health` | Liveness + session snapshot (`status`, `map`, `build`) |
 | `GET` / `POST` | `/echo` | Echo back `msg` query param or raw POST body |
-| `POST` | `/notify` | Ingest a JSON/text event; prints `[notify]` on the server console |
-| `POST` | `/ai/chat` | Send a prompt to Ollama via `LanguageAiRuntime`; returns assistant text |
+| `POST` | `/notify` | Ingest a JSON/text event |
+| `POST` | `/ai/chat` | Send a prompt to Ollama; returns assistant text |
 
 ### Examples
 
 ```sh
-# Health
 curl http://127.0.0.1:8080/health
-
-# Echo
 curl "http://127.0.0.1:8080/echo?msg=hello"
-
-# Notify (logs to server stdout)
 curl -X POST http://127.0.0.1:8080/notify \
   -H "Content-Type: application/json" \
   -d '{"message":"start pattern"}'
-
-# AI chat (requires Ollama running locally)
 curl -X POST http://127.0.0.1:8080/ai/chat \
   -H "Content-Type: application/json" \
   -d '{"prompt":"Hello"}'
 ```
 
-**`/ai/chat` request body**
-
-| Field | Required | Description |
-|-------|----------|-------------|
-| `prompt` | yes* | User message (`text` or `message` also accepted) |
-| `system` | no | Override system prompt for this server session |
-| `clear` | no | If `true`, clears transcript before sending |
-
-
-### Server flags
-
-```sh
-./build/metaagent_server.exe --port 8080 \
-  --ollama-url http://127.0.0.1:11434 \
-  --ollama-model llama3.2 \
-  --system-prompt "You are a concise assistant."
-```
-
-Use `--no-ai` to disable `/ai/chat` (Ollama outbound calls).
+Use `--no-ai` on `metaagent_server` to disable `/ai/chat`.
 
 ```mermaid
 flowchart LR
-    subgraph standalone["Headless (no UE)"]
-        CLI[curl / scripts]
-        SRV[metaagent_server.exe]
-        OLL[Ollama]
+    subgraph desktop["Desktop app (app/)"]
+        UI[WebView UI]
+        APP[metaagent-app.exe]
         LIB[metaagent library]
-        CLI --> SRV --> LIB
-        SRV --> OLL
+        UI --> APP --> LIB
     end
 
-    subgraph ue["Unreal plugin"]
+    subgraph headless["Headless (tools/)"]
+        CLI[curl / scripts]
+        SRV[metaagent_server.exe]
+        CLI --> SRV --> LIB
+    end
+
+    subgraph ue["Unreal plugin (unchanged)"]
         GAME[Game / Editor]
         BRIDGE[Host bridges]
         LIB2[metaagent library]
         GAME --> BRIDGE --> LIB2
     end
-```
 
+    APP -.->|optional METAAGENT_PLATFORM_URL| ue
+```
 
 ## What this library is
 
-`metaagent` is the **domain layer** for a multimodal agent runtime. Hosts (Unreal today, others later) supply:
+`metaagent` is the **domain layer** for a multimodal agent runtime. Hosts supply:
 
-- World I/O (Niagara buffers, view target, filesystem, async HTTP transport)
-- Type conversion (`FVector` ↔ `metaagent::core::Vec3`)
-- Asset binding (textures, pattern assets, Niagara profiles)
+- **Desktop app** (`app/`): WebView, httplib server, mock particle I/O, command dispatch
+- **Unreal plugin**: Niagara, viewport, Epic HTTPServer, async HTTP transport
+- Type conversion (`FVector` ↔ `metaagent::core::Vec3`) and asset binding in UE only
 
 Everything that can be expressed as **state + math + validation + JSON** lives here so it can be unit-tested without an editor.
-
-```mermaid
-flowchart TB
-    subgraph Host["Host adapter (UE plugin)"]
-        IO[Engine I/O]
-        Bridge[TypeBridge + callbacks]
-    end
-
-    subgraph Core["metaagent (portable)"]
-        FSM[TransitionGraph + ParticleScheduler]
-        Act[ActuationMath + FormingSolver]
-        Rep[RepresentationFrame + delivery policy]
-        FX[StateEffectStack]
-        Media[media / mask pipeline]
-        Cam[camera rig + controller]
-        App[commands + GUI catalog]
-        Net[HTTP handlers + platform_client]
-    end
-
-    IO --> Bridge
-    Bridge --> FSM
-    FSM --> Act --> Rep
-    FSM --> FX
-    Bridge --> Media
-    Bridge --> Cam
-    App --> Bridge
-    Net --> Bridge
-```
-
-
 
 ## Layout
 
@@ -136,125 +231,83 @@ flowchart TB
 metaagent/
   metaagent.h                 Public umbrella API (single include)
   metaagent.cpp               Amalgamated implementation
-  src/                        Headers + module .cpp implementations
+  src/                        Portable domain modules
+  app/                        Desktop host (WebView + HTTP + mock runtime)
+    public/                   Embedded UI assets
+    src/                      main, MetaAgentHost, HTTP mount
   tests/                      Standalone unit tests (CMake)
-  tools/                      metaagent_server CLI
+  tools/                      metaagent_server CLI + transport helpers
   CMakeLists.txt
   ARCHITECTURE.md
 ```
 
-Embed elsewhere: add `metaagent/src`, compile `metaagent.cpp` once (the UE plugin uses `MetaAgentCoreAggregate.cpp`).
+**UE embed rule:** compile only `metaagent.cpp` inside the plugin module. Never add `app/` or `tools/` sources to the Unreal build.
 
 ## Portable modules
 
-
 | Namespace             | Responsibility                                                                                                              |
 | --------------------- | --------------------------------------------------------------------------------------------------------------------------- |
-| `metaagent::particle` | FSM, scheduler, forming/return solvers, actuation compose, shape/mask, state effects, effect catalog, **visual continuity** |
-| `metaagent::camera`   | Zoom, cinematic orbit pose, sway, `SlowOrbit`, `CameraController`                                                           |
+| `metaagent::particle` | FSM, scheduler, forming/return solvers, actuation compose, shape/mask, state effects, **visual continuity**               |
+| `metaagent::camera`   | Zoom, cinematic orbit pose, sway, `CameraController`                                                                        |
 | `metaagent::media`    | PNG/JPEG decode, mask pipeline, thumbnails                                                                                  |
 | `metaagent::net`      | Router, inbound handlers, `platform_client` (outbound)                                                                      |
 | `metaagent::session`  | `RuntimeSession`, feature flags, status text                                                                                |
-| `metaagent::app`      | Command parse/validate, GUI panel catalog, GUI action validation                                                            |
-| `metaagent::runtime`  | Host service callbacks (recording, AI) + **ParticleHostCallbacks**                                                          |
+| `metaagent::app`      | Command parse/validate, GUI panel catalog, GUI action validation *(domain — not the desktop exe)*                           |
+| `metaagent::runtime`  | Host service callbacks + **ParticleHostCallbacks**                                                                          |
 | `metaagent::input`    | GUI-open vs observation-mode input policy                                                                                   |
-| `metaagent::ai`       | Ollama chat client, `LanguageAiRuntime`, transcript + representation text                                                   |
-
+| `metaagent::ai`       | Ollama chat client, `LanguageAiRuntime`                                                                                     |
 
 ## Host integration contract (particles)
 
-The scheduler is **callback-driven**. The host implements `SchedulerCallbacks` and optional `**particle_host`** (`ParticleHostCallbacks`):
+The scheduler is **callback-driven**. Each host implements `SchedulerCallbacks` and `ParticleHostCallbacks`:
 
-
-| Callback                                     | Host responsibility                                                |
-| -------------------------------------------- | ------------------------------------------------------------------ |
-| `build_pattern_targets`                      | Shape providers, async mask cache, sync runtime → core             |
-| `begin_pattern_start`                        | Set active config/tags (displayed pose frozen by core before call) |
-| `enter_pattern_state`                        | Sync core ↔ runtime, optional side effects                         |
-| `complete_pattern_run`                       | Reset runtime, re-seed idle baseline                               |
-| `particle_host.read_displayed_positions`     | Return on-screen positions (compose + state-effect offsets)        |
-| `particle_host.apply_world_positions`        | Push frozen pose to runtime/GPU buffers                            |
-| `particle_host.authoritative_particle_count` | Live particle count for baseline/mask validation                   |
-
-
-**Visual continuity:** on each FSM transition, the scheduler reads the **displayed** pose via `particle_host`, then `apply_visual_continuity_for_transition()` / `freeze_displayed_pose()` updates baseline and targets. See `[particle/visual_continuity.hpp](./src/particle/visual_continuity.hpp)` and `[ARCHITECTURE.md](./ARCHITECTURE.md#visual-continuity)`.
+| Callback                                     | Desktop app (`app/`)              | UE plugin                         |
+| -------------------------------------------- | --------------------------------- | --------------------------------- |
+| `build_pattern_targets`                      | `ShapeBuilder` + mock baseline    | Async mask cache, shape providers |
+| `particle_host.read_displayed_positions`     | In-memory mock buffer             | Niagara displayed pose            |
+| `particle_host.apply_world_positions`       | Write mock buffer                 | Push to GPU/runtime               |
+| `particle_host.authoritative_particle_count` | Mock grid count                   | Live Niagara count                |
 
 ## HTTP
 
+| Direction    | Core                         | Desktop app (`app/`)     | UE host                    |
+| ------------ | ---------------------------- | ------------------------ | -------------------------- |
+| **Inbound**  | `net/handlers`, `net/router` | httplib mount            | `FMetaAgentHttpBridge`     |
+| **Outbound** | `net/platform_client`        | `sync_http_client`       | `FMetaAgentPlatformBridge` |
 
-| Direction    | Core                         | UE host                    |
-| ------------ | ---------------------------- | -------------------------- |
-| **Inbound**  | `net/handlers`, `net/router` | `FMetaAgentHttpBridge`     |
-| **Outbound** | `net/platform_client`        | `FMetaAgentPlatformBridge` |
-
-
-## Standalone build
-
-```powershell
-cd metaagent
-cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
-cmake --build build
-ctest --test-dir build --output-on-failure
-```
-
-### Standalone server
-
-```powershell
-cmake --build build --target metaagent_server
-./build/metaagent_server.exe --port 8080
-```
-
-## Unreal integration
+## Unreal integration (unchanged)
 
 The UE plugin embeds this library via `Source/MetaAgentPlugin/MetaAgentCoreAggregate.cpp`.
-
 
 | Adapter                            | Role                                                                          |
 | ---------------------------------- | ----------------------------------------------------------------------------- |
 | `MetaAgentTypeBridge`              | UE ↔ core conversion, scheduler bridge, camera sync                           |
-| `UMetaAgentParticleRuntime`        | Tick glue, Niagara actuation, **ReadDisplayedPose / ApplyHostWorldPositions** |
-| `UMetaAgentParticleControl`        | Orchestrator, representation drivers                                          |
-| `Host/MetaAgentHttpBridge`         | Inbound HTTPServer                                                            |
+| `UMetaAgentParticleRuntime`        | Tick glue, Niagara actuation, displayed pose I/O                              |
+| `Host/MetaAgentHttpBridge`         | Inbound HTTPServer → `RouteTable`                                             |
 | `Host/MetaAgentPlatformBridge`     | Outbound platform POST                                                        |
 | `Host/MetaAgentHostSession`        | Session snapshot for validation                                               |
-| `Host/MetaAgentInputBridge`        | Command / GUI validation                                                      |
+| `Host/MetaAgentInputBridge`        | Command / GUI dispatch                                                        |
 | `Host/MetaAgentHostServicesBridge` | Recording + AI `HostServiceCallbacks`                                         |
 
-
-Tick paths:
-
-- Particles: `UMetaAgentParticleRuntime` → `ParticleScheduler`
-- Camera: `FMetaAgentCameraRuntime` → `CameraController::tick_cinematic()`
-- Platform: `SendEventToPlatform` → `platform_client` → `FMetaAgentPlatformBridge`
+The plugin does **not** compile `app/` or `tools/`. Both hosts link the same portable handlers in `src/net/`.
 
 ## Embed elsewhere
 
 ```cpp
-#include <metaagent/metaagent.h>
+#include "metaagent.h"
 
 int main() {
     metaagent::initialize_defaults();
-    metaagent::net::PlatformEndpointConfig config;
-    config.base_url = "http://127.0.0.1:8000";
-    config.event_endpoint = "/api/unreal/event";
-    // build_platform_outbound_request(...) — no UE required
+    // Use RouteTable, ParticleScheduler, platform_client, etc.
     return 0;
 }
 ```
 
-## Recommended next steps (library)
+## Recommended next steps
 
-1. **Authoritative particle count in `PatternRuntime`** — persist count from `particle_host.authoritative_particle_count` for mask builds and baseline rejection.
-2. **Headless FSM + continuity harness** — mock `ParticleHostCallbacks` in tests; full transition sweep without Niagara.
-3. **Extend session snapshot** — expose pattern state + particle count on `/health`.
-4. **More continuity edges in `visual_continuity_test`** — Anticipating, Dissipating, auto-mode transitions.
+1. Extend `/api/status` with richer session snapshot in core `/health`.
+2. Headless FSM sweep tests with mock `ParticleHostCallbacks`.
+3. Optional app icons under `app/icons/` (copied post-build on Windows).
+4. Package script for portable Windows release (WebView2 + single exe).
 
-Details: `[ARCHITECTURE.md](./ARCHITECTURE.md#roadmap)`.
-
-### Recently completed
-
-- `DisplayedPose`, `freeze_displayed_pose()`, `apply_visual_continuity_for_transition()` (`particle/visual_continuity`)
-- `ParticleHostCallbacks` on `SchedulerCallbacks::particle_host`
-- `visual_continuity_test`, `HostServiceCallbacks` query helpers
-- UE: host read/apply only; `MetaAgentHostServicesBridge`; AI + Recording GUI catalog rows
-
+Details: [`ARCHITECTURE.md`](./ARCHITECTURE.md#roadmap).
