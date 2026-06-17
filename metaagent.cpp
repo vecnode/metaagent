@@ -6,11 +6,13 @@
 #include "core/types.cpp"
 #include "core/math.cpp"
 #include "core/log_sink.cpp"
+#include "core/base64.cpp"
 
 #include "media/decode.cpp"
 #include "media/store.cpp"
 #include "media/pipeline.cpp"
 #include "media/mask_cache.cpp"
+#include "media/tile_sequencer.cpp"
 
 #include "camera/types.cpp"
 #include "camera/rig.cpp"
@@ -33,6 +35,7 @@
 #include "app/commands.cpp"
 #include "app/gui_actions.cpp"
 #include "app/gui_catalog.cpp"
+#include "app/runtime_catalog.cpp"
 #include "input/policy.cpp"
 #include "particle/effect_catalog.cpp"
 #include "particle/state_effects.cpp"
@@ -44,6 +47,8 @@
 #include "net/handlers.cpp"
 #include "net/router.cpp"
 #include "net/platform_client.cpp"
+#include "net/signal_types.cpp"
+#include "net/signal_router.cpp"
 #include "notify/parse.cpp"
 #include "session/status.cpp"
 

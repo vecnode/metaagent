@@ -69,6 +69,16 @@ core::String extract_command_name(const core::String& body)
 	return command;
 }
 
+core::String extract_action_name(const core::String& body)
+{
+	core::String action = net::extract_json_string_field(body, "action");
+	if (action.empty())
+	{
+		action = body;
+	}
+	return action;
+}
+
 } // namespace
 
 void mount_metaagent_routes(httplib::Server& server, MetaAgentHost& host)
@@ -101,6 +111,20 @@ void mount_metaagent_routes(httplib::Server& server, MetaAgentHost& host)
 			response);
 	});
 
+	server.Get("/api/network/status", [&host](const httplib::Request&, httplib::Response& response)
+	{
+		apply_metaagent_response(
+			net::HttpResponse {net::HttpStatus::Ok, "application/json", host.build_network_status_json()},
+			response);
+	});
+
+	server.Get("/api/runtimes", [&host](const httplib::Request&, httplib::Response& response)
+	{
+		apply_metaagent_response(
+			net::HttpResponse {net::HttpStatus::Ok, "application/json", host.build_runtime_catalog_json()},
+			response);
+	});
+
 	server.Get("/api/config", [&host](const httplib::Request&, httplib::Response& response)
 	{
 		apply_metaagent_response(
@@ -119,6 +143,66 @@ void mount_metaagent_routes(httplib::Server& server, MetaAgentHost& host)
 	{
 		apply_metaagent_response(
 			net::HttpResponse {net::HttpStatus::Ok, "application/json", host.build_notify_log_json()},
+			response);
+	});
+
+	server.Get("/api/targets", [&host](const httplib::Request&, httplib::Response& response)
+	{
+		apply_metaagent_response(
+			net::HttpResponse {net::HttpStatus::Ok, "application/json", host.build_targets_json()},
+			response);
+	});
+
+	server.Post("/api/targets/register", [&host](const httplib::Request& request, httplib::Response& response)
+	{
+		apply_metaagent_response(
+			net::HttpResponse {net::HttpStatus::Ok, "application/json", host.register_target(request.body)},
+			response);
+	});
+
+	server.Post("/api/targets/unregister", [&host](const httplib::Request& request, httplib::Response& response)
+	{
+		const core::String target_id = net::extract_json_string_field(request.body, "id");
+		apply_metaagent_response(
+			net::HttpResponse {net::HttpStatus::Ok, "application/json", host.unregister_target(target_id)},
+			response);
+	});
+
+	server.Get("/api/signals/log", [&host](const httplib::Request&, httplib::Response& response)
+	{
+		apply_metaagent_response(
+			net::HttpResponse {net::HttpStatus::Ok, "application/json", host.build_signal_log_json()},
+			response);
+	});
+
+	server.Post("/api/signal", [&host](const httplib::Request& request, httplib::Response& response)
+	{
+		apply_metaagent_response(
+			net::HttpResponse {net::HttpStatus::Ok, "application/json", host.dispatch_signal(request.body)},
+			response);
+	});
+
+	server.Get("/api/sequence/status", [&host](const httplib::Request&, httplib::Response& response)
+	{
+		apply_metaagent_response(
+			net::HttpResponse {net::HttpStatus::Ok, "application/json", host.build_sequence_status_json()},
+			response);
+	});
+
+	server.Post("/api/sequence/load", [&host](const httplib::Request& request, httplib::Response& response)
+	{
+		apply_metaagent_response(
+			net::HttpResponse {net::HttpStatus::Ok, "application/json", host.sequence_load(request.body)},
+			response);
+	});
+
+	server.Post("/api/sequence/control", [&host](const httplib::Request& request, httplib::Response& response)
+	{
+		apply_metaagent_response(
+			net::HttpResponse {
+				net::HttpStatus::Ok,
+				"application/json",
+				host.sequence_control(extract_action_name(request.body))},
 			response);
 	});
 

@@ -99,6 +99,14 @@ add_executable(metaagent_language_runtime_test tests/language_runtime_test.cpp)
 target_link_libraries(metaagent_language_runtime_test PRIVATE metaagent)
 add_test(NAME language_runtime_test COMMAND metaagent_language_runtime_test)
 
+add_executable(metaagent_signal_router_test tests/signal_router_test.cpp)
+target_link_libraries(metaagent_signal_router_test PRIVATE metaagent)
+add_test(NAME signal_router_test COMMAND metaagent_signal_router_test)
+
+add_executable(metaagent_runtime_catalog_test tests/runtime_catalog_test.cpp)
+target_link_libraries(metaagent_runtime_catalog_test PRIVATE metaagent)
+add_test(NAME runtime_catalog_test COMMAND metaagent_runtime_catalog_test)
+
 add_executable(metaagent_server tools/metaagent_server.cpp tools/mini_http_server.cpp tools/sync_http_client.cpp)
 target_include_directories(metaagent_server PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/tools)
 target_link_libraries(metaagent_server PRIVATE metaagent)

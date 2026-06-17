@@ -9,7 +9,7 @@
 namespace metaagent::app_host {
 namespace {
 
-core::String pattern_state_name(const particle::PatternState state)
+core::String particle_pattern_state_name(const particle::PatternState state)
 {
 	switch (state)
 	{
@@ -58,6 +58,7 @@ void MetaAgentHost::initialize()
 
 	seed_mock_particles();
 	wire_callbacks();
+	seed_default_targets();
 
 	language_ai_transport_.post_json = [](
 		const core::String& url,
@@ -228,6 +229,7 @@ void MetaAgentHost::tick(float delta_seconds)
 	std::lock_guard<std::mutex> lock(mutex_);
 	scheduler_.tick_pattern_runtime(delta_seconds, scheduler_callbacks_);
 	scheduler_.tick_state_effects();
+	tick_sequence(delta_seconds);
 }
 
 session::RuntimeSession& MetaAgentHost::session()
@@ -271,6 +273,18 @@ void MetaAgentHost::on_notify(const core::String& message)
 		notify_log_.erase(notify_log_.begin());
 	}
 	std::cout << "[notify] " << message << std::endl;
+
+	net::SignalLogEntry inbound;
+	inbound.direction = "inbound";
+	inbound.type = "notify";
+	inbound.summary = message;
+	inbound.delivered = true;
+	signal_router_.append_log(inbound);
+
+	if (!session_.features.networking)
+	{
+		return;
+	}
 
 	if (!config_.platform_base_url.empty())
 	{
@@ -333,7 +347,7 @@ core::String MetaAgentHost::build_status_json() const
 	stream << net::json_string_field("map", session_.map_name) << ',';
 	stream << net::json_string_field("build", session_.build_label) << ',';
 	stream << net::json_bool_field("active", session_.active) << ',';
-	stream << net::json_string_field("pattern_state", pattern_state_name(runtime.state)) << ',';
+	stream << net::json_string_field("pattern_state", particle_pattern_state_name(runtime.state)) << ',';
 	stream << net::json_string_field("pattern_status",
 		scheduler_.build_pattern_status_text(
 			authoritative_particle_count(),
@@ -393,7 +407,9 @@ core::String MetaAgentHost::build_config_json() const
 	stream << net::json_string_field("ollama_url", config_.ollama_url) << ',';
 	stream << net::json_string_field("ollama_model", config_.ollama_model) << ',';
 	stream << net::json_string_field("platform_base_url", config_.platform_base_url) << ',';
-	stream << net::json_string_field("platform_event_endpoint", config_.platform_event_endpoint);
+	stream << net::json_string_field("platform_event_endpoint", config_.platform_event_endpoint) << ',';
+	stream << net::json_string_field("default_target_id", config_.default_target_id) << ',';
+	stream << net::json_string_field("sequence_target_id", config_.sequence_target_id);
 	stream << '}';
 	return stream.str();
 }
@@ -426,6 +442,26 @@ void MetaAgentHost::apply_command_side_effects(const app::CommandId command)
 		session_.features.networking = !session_.features.networking;
 		session_.http_enabled = session_.features.networking;
 		break;
+	case app::CommandId::StartPlatformAudio:
+	{
+		net::SignalEnvelope envelope;
+		envelope.type = "trigger";
+		envelope.target = config_.default_target_id;
+		envelope.id = "cmd-start-audio";
+		envelope.payload_json = "{" + net::json_string_field("name", "start_audio") + "}";
+		send_signal(envelope);
+		break;
+	}
+	case app::CommandId::StartPlatformImage:
+	{
+		net::SignalEnvelope envelope;
+		envelope.type = "trigger";
+		envelope.target = config_.default_target_id;
+		envelope.id = "cmd-start-image";
+		envelope.payload_json = "{" + net::json_string_field("name", "start_image") + "}";
+		send_signal(envelope);
+		break;
+	}
 	default:
 		break;
 	}
@@ -449,11 +485,367 @@ core::String MetaAgentHost::dispatch_command(const core::String& command_name)
 		apply_command_side_effects(command);
 		stream << ',';
 		stream << net::json_string_field("pattern_state",
-			pattern_state_name(scheduler_.pattern_runtime.state));
+			particle_pattern_state_name(scheduler_.pattern_runtime.state));
 	}
 
 	stream << '}';
 	return stream.str();
+}
+
+void MetaAgentHost::seed_default_targets()
+{
+	if (!config_.platform_base_url.empty())
+	{
+		net::PlatformEndpointConfig platform_config;
+		platform_config.base_url = config_.platform_base_url;
+		platform_config.event_endpoint = config_.platform_event_endpoint;
+
+		net::SignalTarget platform_target;
+		platform_target.id = config_.default_target_id;
+		platform_target.control_url = net::build_platform_url(platform_config);
+		platform_target.capabilities = {"platform_event", "command", "trigger"};
+		platform_target.enabled = true;
+		signal_router_.register_target(platform_target);
+	}
+
+	if (config_.extra_targets.empty())
+	{
+		return;
+	}
+
+	size_t cursor = 0;
+	while (cursor < config_.extra_targets.size())
+	{
+		const size_t separator = config_.extra_targets.find(';', cursor);
+		const core::String entry = config_.extra_targets.substr(
+			cursor,
+			separator == core::String::npos ? core::String::npos : separator - cursor);
+
+		const size_t pipe = entry.find('|');
+		if (pipe != core::String::npos)
+		{
+			net::SignalTarget target;
+			target.id = entry.substr(0, pipe);
+			target.control_url = entry.substr(pipe + 1);
+			target.enabled = true;
+			signal_router_.register_target(target);
+		}
+
+		if (separator == core::String::npos)
+		{
+			break;
+		}
+		cursor = separator + 1;
+	}
+}
+
+net::SignalTransportFn MetaAgentHost::make_signal_transport() const
+{
+	return [](
+		const core::String& url,
+		const core::String& body,
+		int32_t& status_code_out,
+		core::String& response_body_out)
+	{
+		return tools::sync_http_post_json(url, body, status_code_out, response_body_out);
+	};
+}
+
+void MetaAgentHost::log_signal_delivery(
+	const core::String& direction,
+	const net::SignalEnvelope& envelope,
+	const net::SignalDispatchResult& result,
+	const core::String& summary)
+{
+	net::SignalLogEntry entry;
+	entry.direction = direction;
+	entry.signal_id = envelope.id.empty() ? result.signal_id : envelope.id;
+	entry.type = envelope.type;
+	entry.target = envelope.target.empty() ? result.target_id : envelope.target;
+	entry.summary = summary;
+	entry.delivered = result.success;
+	entry.status_code = result.status_code;
+	signal_router_.append_log(entry);
+}
+
+net::SignalDispatchResult MetaAgentHost::send_signal(const net::SignalEnvelope& envelope)
+{
+	if (!session_.features.networking)
+	{
+		net::SignalDispatchResult blocked;
+		blocked.error_message = "Networking runtime is disabled.";
+		return blocked;
+	}
+
+	net::SignalEnvelope outbound = envelope;
+	if (outbound.id.empty())
+	{
+		outbound.id = "sig-" + std::to_string(signal_router_.log_entries().size() + 1);
+	}
+
+	const net::SignalDispatchResult result =
+		signal_router_.dispatch(outbound, make_signal_transport());
+
+	const core::String summary = result.success
+		? net::signal_type_display_name(outbound.type) + " → " + outbound.target
+		: result.error_message;
+
+	log_signal_delivery("outbound", outbound, result, summary);
+	return result;
+}
+
+core::String MetaAgentHost::build_network_status_json() const
+{
+	std::lock_guard<std::mutex> lock(mutex_);
+	std::ostringstream stream;
+	stream << '{';
+	stream << net::json_bool_field("networking_enabled", session_.features.networking) << ',';
+	stream << net::json_bool_field("http_enabled", session_.http_enabled) << ',';
+	stream << net::json_bool_field("http_router_bound", session_.http_router_bound) << ',';
+	stream << "\"target_count\":" << signal_router_.list_targets().size() << ',';
+	stream << "\"signal_log_count\":" << signal_router_.log_entries().size() << ',';
+	stream << net::json_string_field("default_target_id", config_.default_target_id) << ',';
+	stream << net::json_string_field("sequence_target_id", config_.sequence_target_id);
+	stream << '}';
+	return stream.str();
+}
+
+core::String MetaAgentHost::build_runtime_catalog_json() const
+{
+	std::lock_guard<std::mutex> lock(mutex_);
+	return app::build_runtime_catalog_json(session_);
+}
+
+core::String MetaAgentHost::build_targets_json() const
+{
+	std::lock_guard<std::mutex> lock(mutex_);
+	return net::build_targets_json(signal_router_.list_targets());
+}
+
+core::String MetaAgentHost::register_target(const core::String& body)
+{
+	std::lock_guard<std::mutex> lock(mutex_);
+	net::SignalTarget target;
+	core::String error;
+	if (!net::parse_target_from_json(body, target, error))
+	{
+		return "{"
+			+ net::json_bool_field("success", false) + ","
+			+ net::json_string_field("message", error)
+			+ "}";
+	}
+
+	signal_router_.register_target(target);
+	return "{"
+		+ net::json_bool_field("success", true) + ","
+		+ net::json_string_field("id", target.id)
+		+ "}";
+}
+
+core::String MetaAgentHost::unregister_target(const core::String& target_id)
+{
+	std::lock_guard<std::mutex> lock(mutex_);
+	const bool removed = signal_router_.unregister_target(target_id);
+	return "{"
+		+ net::json_bool_field("success", removed) + ","
+		+ net::json_string_field("id", target_id)
+		+ "}";
+}
+
+core::String MetaAgentHost::dispatch_signal(const core::String& body)
+{
+	std::lock_guard<std::mutex> lock(mutex_);
+	net::SignalEnvelope envelope;
+	core::String error;
+	if (!net::parse_signal_envelope(body, envelope, error))
+	{
+		return "{"
+			+ net::json_bool_field("success", false) + ","
+			+ net::json_string_field("message", error)
+			+ "}";
+	}
+
+	const net::SignalDispatchResult result = send_signal(envelope);
+	std::ostringstream stream;
+	stream << '{';
+	stream << net::json_bool_field("success", result.success) << ',';
+	stream << net::json_string_field("signal_id", envelope.id) << ',';
+	stream << net::json_string_field("target", envelope.target) << ',';
+	stream << "\"status_code\":" << result.status_code << ',';
+	stream << net::json_string_field("message",
+		result.success ? "Signal delivered." : result.error_message);
+	stream << '}';
+	return stream.str();
+}
+
+core::String MetaAgentHost::build_signal_log_json() const
+{
+	std::lock_guard<std::mutex> lock(mutex_);
+	return net::build_signal_log_json(signal_router_.log_entries());
+}
+
+core::String MetaAgentHost::build_sequence_status_json() const
+{
+	std::lock_guard<std::mutex> lock(mutex_);
+	return media::build_tile_sequence_status_json(tile_sequencer_.status());
+}
+
+core::String MetaAgentHost::sequence_load(const core::String& body)
+{
+	std::lock_guard<std::mutex> lock(mutex_);
+	const core::String path = net::extract_json_string_field(body, "path");
+	const core::String columns_text = net::extract_json_string_field(body, "columns");
+	const core::String rows_text = net::extract_json_string_field(body, "rows");
+
+	int32_t columns = 4;
+	int32_t rows = 4;
+	if (!columns_text.empty())
+	{
+		columns = std::stoi(columns_text);
+	}
+	else
+	{
+		const size_t columns_key = body.find("\"columns\":");
+		if (columns_key != core::String::npos)
+		{
+			columns = std::stoi(body.substr(columns_key + 10));
+		}
+	}
+	if (!rows_text.empty())
+	{
+		rows = std::stoi(rows_text);
+	}
+	else
+	{
+		const size_t rows_key = body.find("\"rows\":");
+		if (rows_key != core::String::npos)
+		{
+			rows = std::stoi(body.substr(rows_key + 7));
+		}
+	}
+
+	const core::String target = net::extract_json_string_field(body, "target");
+	if (!target.empty())
+	{
+		config_.sequence_target_id = target;
+	}
+
+	last_sequence_tile_sent_ = -1;
+	const bool loaded = tile_sequencer_.load_image(path, columns, rows);
+	const media::TileSequenceStatus status = tile_sequencer_.status();
+
+	std::ostringstream stream;
+	stream << '{';
+	stream << net::json_bool_field("success", loaded) << ',';
+	stream << net::json_string_field("message",
+		loaded ? "Sequence loaded." : status.error_message) << ',';
+	stream << net::json_string_field("target", config_.sequence_target_id);
+	stream << '}';
+	return stream.str();
+}
+
+core::String MetaAgentHost::sequence_control(const core::String& action)
+{
+	std::lock_guard<std::mutex> lock(mutex_);
+	std::ostringstream stream;
+	stream << '{';
+
+	if (action == "play")
+	{
+		tile_sequencer_.play();
+		emit_current_tile_signal();
+		stream << net::json_bool_field("success", true) << ',';
+		stream << net::json_string_field("message", "Sequence playing.");
+	}
+	else if (action == "pause")
+	{
+		tile_sequencer_.pause();
+		stream << net::json_bool_field("success", true) << ',';
+		stream << net::json_string_field("message", "Sequence paused.");
+	}
+	else if (action == "step")
+	{
+		const bool emitted = emit_current_tile_signal();
+		if (!tile_sequencer_.step_forward())
+		{
+			stream << net::json_bool_field("success", emitted) << ',';
+			stream << net::json_string_field("message",
+				emitted ? "Final tile sent." : tile_sequencer_.status().error_message);
+		}
+		else
+		{
+			stream << net::json_bool_field("success", true) << ',';
+			stream << net::json_string_field("message", "Tile sent and sequence advanced.");
+		}
+	}
+	else if (action == "reset")
+	{
+		tile_sequencer_.reset();
+		last_sequence_tile_sent_ = -1;
+		stream << net::json_bool_field("success", true) << ',';
+		stream << net::json_string_field("message", "Sequence reset.");
+	}
+	else if (action == "emit")
+	{
+		const bool emitted = emit_current_tile_signal();
+		stream << net::json_bool_field("success", emitted) << ',';
+		stream << net::json_string_field("message", emitted ? "Tile signal sent." : "Unable to emit tile.");
+	}
+	else
+	{
+		stream << net::json_bool_field("success", false) << ',';
+		stream << net::json_string_field("message", "Unknown sequence action.");
+	}
+
+	stream << '}';
+	return stream.str();
+}
+
+void MetaAgentHost::tick_sequence(const float delta_seconds)
+{
+	const media::TileSequenceState previous_state = tile_sequencer_.status().state;
+	tile_sequencer_.tick(delta_seconds);
+
+	if (tile_sequencer_.status().state == media::TileSequenceState::Playing
+		&& tile_sequencer_.status().current_index != last_sequence_tile_sent_)
+	{
+		emit_current_tile_signal();
+	}
+
+	if (previous_state == media::TileSequenceState::Playing
+		&& tile_sequencer_.status().state == media::TileSequenceState::Complete)
+	{
+		net::SignalEnvelope envelope;
+		envelope.type = "trigger";
+		envelope.target = config_.sequence_target_id;
+		envelope.id = "seq-complete";
+		envelope.payload_json = "{" + net::json_string_field("name", "sequence_complete") + "}";
+		send_signal(envelope);
+	}
+}
+
+bool MetaAgentHost::emit_current_tile_signal()
+{
+	const media::TileSequenceStatus status = tile_sequencer_.status();
+	if (status.state == media::TileSequenceState::Idle || status.total_tiles <= 0)
+	{
+		return false;
+	}
+
+	const int32_t tile_index = (status.current_index < status.total_tiles)
+		? status.current_index
+		: status.total_tiles - 1;
+
+	if (tile_index == last_sequence_tile_sent_
+		&& status.state != media::TileSequenceState::Playing)
+	{
+		return false;
+	}
+
+	net::SignalEnvelope envelope = tile_sequencer_.build_tile_signal(config_.sequence_target_id);
+	const net::SignalDispatchResult result = send_signal(envelope);
+	last_sequence_tile_sent_ = tile_index;
+	return result.success;
 }
 
 } // namespace metaagent::app_host
