@@ -11,4 +11,10 @@ bool sync_http_post_json(
 	int32_t& status_code_out,
 	core::String& response_body_out);
 
+/** Synchronous HTTP GET. Returns false on socket/transport failure. */
+bool sync_http_get(
+	const core::String& url,
+	int32_t& status_code_out,
+	core::String& response_body_out);
+
 } // namespace metaagent::tools

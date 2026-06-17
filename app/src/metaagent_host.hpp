@@ -16,7 +16,6 @@ struct HostConfig {
 	core::String platform_event_endpoint = "/api/unreal/event";
 	core::String default_target_id = "platform-default";
 	core::String extra_targets;
-	core::String sequence_target_id = "media-player-cpp";
 };
 
 class MetaAgentHost {
@@ -48,9 +47,9 @@ public:
 	core::String dispatch_signal(const core::String& body);
 	core::String build_signal_log_json() const;
 
-	core::String build_sequence_status_json() const;
-	core::String sequence_load(const core::String& body);
-	core::String sequence_control(const core::String& action);
+	core::String build_ollama_status_json();
+	core::String update_ollama_config(const core::String& body);
+	core::String set_ue5_runtimes_enabled(const core::String& body);
 
 private:
 	void wire_callbacks();
@@ -69,8 +68,6 @@ private:
 		const net::SignalDispatchResult& result,
 		const core::String& summary);
 	net::SignalTransportFn make_signal_transport() const;
-	void tick_sequence(float delta_seconds);
-	bool emit_current_tile_signal();
 
 	HostConfig config_;
 	session::RuntimeSession session_;
@@ -81,7 +78,6 @@ private:
 	ai::LanguageAiTransportCallbacks language_ai_transport_;
 	net::RouteTable routes_;
 	net::SignalRouter signal_router_;
-	media::TileSequencer tile_sequencer_;
 
 	core::Array<core::Vec3> mock_world_positions_;
 	core::Array<core::String> notify_log_;
@@ -89,7 +85,7 @@ private:
 	bool autopilot_enabled_ = false;
 	bool cinematic_enabled_ = false;
 	bool focus_particles_ = false;
-	int32_t last_sequence_tile_sent_ = -1;
+	bool ue5_runtimes_enabled_ = false;
 	mutable std::mutex mutex_;
 };
 

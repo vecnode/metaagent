@@ -18,100 +18,154 @@ function setHint(id, message, isError = false) {
   el.classList.toggle("error", isError);
 }
 
-function formatSequenceStatus(status) {
-  if (!status || status.state === "idle") {
-    return "No sequence loaded.";
+function activateTab(name) {
+  document.querySelectorAll(".tab").forEach((tab) => {
+    const active = tab.dataset.tab === name;
+    tab.classList.toggle("active", active);
+    tab.setAttribute("aria-selected", active ? "true" : "false");
+  });
+  document.querySelectorAll(".panel-view").forEach((panel) => {
+    const active = panel.id === `panel-${name}`;
+    panel.classList.toggle("active", active);
+    panel.hidden = !active;
+  });
+}
+
+document.querySelectorAll(".tab").forEach((tab) => {
+  tab.addEventListener("click", () => activateTab(tab.dataset.tab));
+});
+
+function isUe5Runtime(runtime) {
+  return runtime.host_scope === "ue5";
+}
+
+function runtimeTitle(runtime) {
+  return isUe5Runtime(runtime) ? `UE5 ${runtime.title}` : runtime.title;
+}
+
+function renderRuntimeRow(runtime) {
+  const row = document.createElement("li");
+  row.className = "runtime-row";
+  const running = !!runtime.active_in_session;
+  row.innerHTML = `
+    <span class="status-lamp ${running ? "on" : "off"}" title="${running ? "Running" : "Stopped"}"></span>
+    <span class="runtime-row-name">${runtimeTitle(runtime)}</span>
+  `;
+  return row;
+}
+
+function appendRuntimeGroup(container, title, runtimes) {
+  if (!runtimes.length) return;
+
+  const section = document.createElement("div");
+  section.className = "runtime-section";
+  section.innerHTML = `<h3 class="runtime-section-title">${title}</h3>`;
+
+  const list = document.createElement("ul");
+  list.className = "runtime-rows";
+  for (const runtime of runtimes) {
+    list.appendChild(renderRuntimeRow(runtime));
   }
-  const index = Math.max(0, status.current_index);
-  const total = status.total_tiles || 0;
-  return [
-    `State: ${status.state}`,
-    status.source_path ? `Source: ${status.source_path}` : null,
-    total ? `Tile: ${index + 1} / ${total} (${status.columns}×${status.rows})` : null,
-    status.tile_width ? `Tile size: ${status.tile_width}×${status.tile_height}` : null,
-    status.error ? `Error: ${status.error}` : null,
-  ]
-    .filter(Boolean)
-    .join(" · ");
+  section.appendChild(list);
+  container.appendChild(section);
 }
 
 async function refreshNetwork() {
   const network = await fetchJson("/api/network/status");
   const enabled = !!network.networking_enabled;
-  const dot = document.getElementById("network-dot");
-  const label = document.getElementById("network-label");
-  const detail = document.getElementById("network-detail");
-  const toggle = document.getElementById("network-toggle");
-
-  dot.classList.toggle("online", enabled);
-  dot.classList.toggle("offline", !enabled);
-  label.textContent = enabled ? "Networking Engine ON" : "Networking Engine OFF";
-  detail.textContent = `${network.target_count || 0} target(s) · ${network.signal_log_count || 0} log entries`;
-  toggle.classList.toggle("active", enabled);
-  toggle.textContent = enabled ? "Disable Networking" : "Enable Networking";
+  document.getElementById("network-dot").classList.toggle("online", enabled);
+  document.getElementById("network-dot").classList.toggle("offline", !enabled);
+  document.getElementById("network-label").textContent = enabled ? "Networking ON" : "Networking OFF";
 }
 
 async function refreshRuntimes() {
+  const container = document.getElementById("runtime-sections");
+  if (!container) return;
+
   const payload = await fetchJson("/api/runtimes");
-  const list = document.getElementById("runtime-list");
-  list.innerHTML = "";
   const runtimes = payload.runtimes || [];
-  if (!runtimes.length) {
-    list.innerHTML = "<li class='runtime-item muted'>No runtimes reported.</li>";
-    return;
+  const ue5Enabled = !!payload.ue5_runtimes_enabled;
+  container.innerHTML = "";
+
+  const toggle = document.getElementById("ue5-runtimes-toggle");
+  const hint = document.getElementById("ue5-runtimes-hint");
+  if (toggle) {
+    toggle.classList.toggle("active", ue5Enabled);
+    toggle.textContent = ue5Enabled ? "Disable UE5 Runtimes" : "Enable UE5 Runtimes";
   }
-  for (const runtime of runtimes) {
-    const item = document.createElement("li");
-    item.className = "runtime-item";
-    item.innerHTML = `
-      <div class="runtime-title">
-        <span>${runtime.title}</span>
-        <span class="runtime-state ${runtime.active_in_session ? "active" : "inactive"}">
-          ${runtime.active_in_session ? "active" : "inactive"}
-        </span>
-      </div>
-      <div class="runtime-meta">${runtime.host_scope}</div>
-      <div class="runtime-summary">${runtime.summary}</div>
-    `;
-    list.appendChild(item);
+  if (hint) {
+    hint.textContent = ue5Enabled
+      ? "UE5 plugin runtimes are enabled."
+      : "UE5 plugin runtimes are off by default.";
+  }
+
+  const core = runtimes.filter((runtime) => !isUe5Runtime(runtime));
+  const ue5 = runtimes.filter((runtime) => isUe5Runtime(runtime));
+
+  appendRuntimeGroup(container, "Core", core);
+
+  if (core.length && ue5.length) {
+    const divider = document.createElement("div");
+    divider.className = "runtime-divider";
+    divider.setAttribute("role", "separator");
+    divider.textContent = "Unreal Engine 5";
+    container.appendChild(divider);
+  }
+
+  appendRuntimeGroup(container, "UE5 Plugin", ue5);
+
+  if (!core.length && !ue5.length) {
+    container.innerHTML = "<p class='muted'>No runtimes reported.</p>";
   }
 }
 
-async function refreshTargets() {
-  const payload = await fetchJson("/api/targets");
-  const targets = payload.targets || [];
-  const list = document.getElementById("target-list");
-  const select = document.getElementById("signal-target");
-  list.innerHTML = "";
-  select.innerHTML = "";
+async function refreshOllama() {
+  const status = await fetchJson("/api/ollama/status");
+  const lamp = document.getElementById("ollama-lamp");
+  const text = document.getElementById("ollama-status-text");
+  const modelSelect = document.getElementById("ollama-model");
+  const urlHint = document.getElementById("ollama-url-hint");
 
-  if (!targets.length) {
-    list.innerHTML = "<li class='target-item muted'>No targets registered.</li>";
-    const option = document.createElement("option");
-    option.value = "";
-    option.textContent = "No targets";
-    select.appendChild(option);
+  if (!status.ai_enabled) {
+    lamp.className = "status-lamp off";
+    text.textContent = "AI disabled (METAAGENT_NO_AI)";
+    urlHint.textContent = status.ollama_url ? `URL: ${status.ollama_url}` : "";
     return;
   }
 
-  for (const target of targets) {
-    const item = document.createElement("li");
-    item.className = "target-item";
-    item.innerHTML = `
-      <div class="target-head">
-        <strong>${target.id}</strong>
-        <span class="target-state ${target.enabled ? "enabled" : "disabled"}">
-          ${target.enabled ? "enabled" : "disabled"}
-        </span>
-      </div>
-      <div class="target-url">${target.control_url}</div>
-    `;
-    list.appendChild(item);
+  const online = !!status.online;
+  lamp.className = `status-lamp ${online ? "on" : "off"}`;
+  text.textContent = online ? "Ollama is running" : "Ollama is not reachable";
+  urlHint.textContent = `URL: ${status.ollama_url || "—"}`;
 
+  if (!modelSelect) return;
+
+  const models = status.models || [];
+  const selected = status.model || "";
+  const previous = modelSelect.value;
+  modelSelect.innerHTML = "";
+
+  if (!models.length) {
     const option = document.createElement("option");
-    option.value = target.id;
-    option.textContent = target.id;
-    select.appendChild(option);
+    option.value = selected;
+    option.textContent = selected || "No models found";
+    modelSelect.appendChild(option);
+  } else {
+    for (const name of models) {
+      const option = document.createElement("option");
+      option.value = name;
+      option.textContent = name;
+      if (name === selected) {
+        option.selected = true;
+      }
+      modelSelect.appendChild(option);
+    }
+  }
+
+  if (previous && [...modelSelect.options].some((option) => option.value === previous)) {
+    modelSelect.value = previous;
+  } else if (selected) {
+    modelSelect.value = selected;
   }
 }
 
@@ -124,16 +178,12 @@ async function refreshCommsLog() {
   const entries = [];
   for (const entry of signals.entries || []) {
     entries.push({
-      kind: "signal",
-      direction: entry.direction,
       text: `[${entry.direction}] ${entry.type} → ${entry.target || "—"} · ${entry.summary}`,
       delivered: entry.delivered,
     });
   }
   for (const entry of notify.entries || []) {
     entries.push({
-      kind: "notify",
-      direction: "inbound",
       text: `[notify] ${entry.message || JSON.stringify(entry)}`,
       delivered: true,
     });
@@ -154,107 +204,6 @@ async function refreshCommsLog() {
   }
 }
 
-async function refreshSequence() {
-  const status = await fetchJson("/api/sequence/status");
-  document.getElementById("sequence-status").textContent = formatSequenceStatus(status);
-}
-
-async function toggleNetworking() {
-  const result = await fetchJson("/api/command", {
-    method: "POST",
-    body: JSON.stringify({ command: "toggle_networking_runtime" }),
-  });
-  setHint("signal-output", result.message || (result.success ? "Networking updated." : "Rejected."), !result.success);
-  await refreshNetwork();
-  await refreshRuntimes();
-}
-
-document.getElementById("network-toggle").addEventListener("click", toggleNetworking);
-
-document.getElementById("target-form").addEventListener("submit", async (event) => {
-  event.preventDefault();
-  const id = document.getElementById("target-id").value.trim();
-  const control_url = document.getElementById("target-url").value.trim();
-  if (!id || !control_url) return;
-
-  const result = await fetchJson("/api/targets/register", {
-    method: "POST",
-    body: JSON.stringify({ id, control_url, enabled: true }),
-  });
-  setHint("signal-output", result.success ? `Registered ${id}.` : result.message || "Registration failed.", !result.success);
-  if (result.success) {
-    document.getElementById("target-id").value = "";
-    document.getElementById("target-url").value = "";
-    await refreshTargets();
-    await refreshNetwork();
-  }
-});
-
-document.getElementById("signal-form").addEventListener("submit", async (event) => {
-  event.preventDefault();
-  const type = document.getElementById("signal-type").value;
-  const target = document.getElementById("signal-target").value;
-  const payloadText = document.getElementById("signal-payload").value.trim() || "{}";
-
-  let payload;
-  try {
-    payload = JSON.parse(payloadText);
-  } catch {
-    setHint("signal-output", "Payload must be valid JSON.", true);
-    return;
-  }
-
-  const body = {
-    type,
-    target,
-    payload,
-  };
-
-  const result = await fetchJson("/api/signal", {
-    method: "POST",
-    body: JSON.stringify(body),
-  });
-
-  setHint(
-    "signal-output",
-    result.success ? `Signal ${result.signal_id || ""} delivered.` : result.message || "Delivery failed.",
-    !result.success
-  );
-  await refreshCommsLog();
-  await refreshNetwork();
-});
-
-document.getElementById("sequence-load-form").addEventListener("submit", async (event) => {
-  event.preventDefault();
-  const path = document.getElementById("sequence-path").value.trim();
-  const columns = Number(document.getElementById("sequence-cols").value) || 4;
-  const rows = Number(document.getElementById("sequence-rows").value) || 4;
-  const target = document.getElementById("sequence-target").value.trim();
-
-  const body = { path, columns, rows };
-  if (target) body.target = target;
-
-  const result = await fetchJson("/api/sequence/load", {
-    method: "POST",
-    body: JSON.stringify(body),
-  });
-
-  setHint("signal-output", result.message || (result.success ? "Sequence loaded." : "Load failed."), !result.success);
-  await refreshSequence();
-});
-
-document.querySelectorAll("[data-seq]").forEach((button) => {
-  button.addEventListener("click", async () => {
-    const result = await fetchJson("/api/sequence/control", {
-      method: "POST",
-      body: JSON.stringify({ action: button.dataset.seq }),
-    });
-    setHint("signal-output", result.message || "Sequence updated.", !result.success);
-    await refreshSequence();
-    await refreshCommsLog();
-  });
-});
-
 document.getElementById("chat-form").addEventListener("submit", async (event) => {
   event.preventDefault();
   const input = document.getElementById("chat-input");
@@ -273,18 +222,51 @@ document.getElementById("chat-form").addEventListener("submit", async (event) =>
     result.assistant || result.message || result.error || JSON.stringify(result, null, 2);
 });
 
+document.getElementById("ollama-refresh").addEventListener("click", refreshOllama);
+
+document.getElementById("ue5-runtimes-toggle").addEventListener("click", async () => {
+  const payload = await fetchJson("/api/runtimes");
+  const nextEnabled = !payload.ue5_runtimes_enabled;
+  const result = await fetchJson("/api/runtimes/ue5", {
+    method: "POST",
+    body: JSON.stringify({ enabled: nextEnabled }),
+  });
+  if (!result.success) {
+    setHint("settings-output", result.message || "Failed to update UE5 runtimes.", true);
+    return;
+  }
+  await refreshRuntimes();
+});
+
+document.getElementById("ollama-form").addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const model = document.getElementById("ollama-model").value.trim();
+  if (!model) return;
+
+  const result = await fetchJson("/api/ollama/config", {
+    method: "POST",
+    body: JSON.stringify({ model }),
+  });
+
+  setHint(
+    "settings-output",
+    result.success ? `Model set to ${result.model}.` : result.message || "Update failed.",
+    !result.success
+  );
+  await refreshOllama();
+});
+
 async function refreshAll() {
   await Promise.all([
     refreshNetwork(),
     refreshRuntimes(),
-    refreshTargets(),
+    refreshOllama(),
     refreshCommsLog(),
-    refreshSequence(),
   ]);
 }
 
 refreshAll();
 setInterval(refreshNetwork, 3000);
 setInterval(refreshCommsLog, 2500);
-setInterval(refreshSequence, 2000);
-setInterval(refreshRuntimes, 10000);
+setInterval(refreshRuntimes, 5000);
+setInterval(refreshOllama, 15000);

@@ -125,6 +125,13 @@ void mount_metaagent_routes(httplib::Server& server, MetaAgentHost& host)
 			response);
 	});
 
+	server.Post("/api/runtimes/ue5", [&host](const httplib::Request& request, httplib::Response& response)
+	{
+		apply_metaagent_response(
+			net::HttpResponse {net::HttpStatus::Ok, "application/json", host.set_ue5_runtimes_enabled(request.body)},
+			response);
+	});
+
 	server.Get("/api/config", [&host](const httplib::Request&, httplib::Response& response)
 	{
 		apply_metaagent_response(
@@ -182,27 +189,17 @@ void mount_metaagent_routes(httplib::Server& server, MetaAgentHost& host)
 			response);
 	});
 
-	server.Get("/api/sequence/status", [&host](const httplib::Request&, httplib::Response& response)
+	server.Get("/api/ollama/status", [&host](const httplib::Request&, httplib::Response& response)
 	{
 		apply_metaagent_response(
-			net::HttpResponse {net::HttpStatus::Ok, "application/json", host.build_sequence_status_json()},
+			net::HttpResponse {net::HttpStatus::Ok, "application/json", host.build_ollama_status_json()},
 			response);
 	});
 
-	server.Post("/api/sequence/load", [&host](const httplib::Request& request, httplib::Response& response)
+	server.Post("/api/ollama/config", [&host](const httplib::Request& request, httplib::Response& response)
 	{
 		apply_metaagent_response(
-			net::HttpResponse {net::HttpStatus::Ok, "application/json", host.sequence_load(request.body)},
-			response);
-	});
-
-	server.Post("/api/sequence/control", [&host](const httplib::Request& request, httplib::Response& response)
-	{
-		apply_metaagent_response(
-			net::HttpResponse {
-				net::HttpStatus::Ok,
-				"application/json",
-				host.sequence_control(extract_action_name(request.body))},
+			net::HttpResponse {net::HttpStatus::Ok, "application/json", host.update_ollama_config(request.body)},
 			response);
 	});
 

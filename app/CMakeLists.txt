@@ -249,3 +249,6 @@ if(UNIX AND NOT APPLE)
         COMMENT "Copying application assets next to executable"
     )
 endif()
+
+include(${CMAKE_SOURCE_DIR}/cmake/FFmpeg.cmake)
+metaagent_stage_ffmpeg_runtime(metaagent-app)

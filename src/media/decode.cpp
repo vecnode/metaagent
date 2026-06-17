@@ -2,12 +2,18 @@
 
 #include <chrono>
 #include <cstdint>
+#include <cstring>
 #include <filesystem>
 #include <fstream>
 #include <vector>
 
-#define STB_IMAGE_IMPLEMENTATION
-#include "third_party/stb_image.h"
+extern "C" {
+#include <libavcodec/avcodec.h>
+#include <libavformat/avformat.h>
+#include <libavutil/error.h>
+#include <libavutil/mem.h>
+#include <libswscale/swscale.h>
+}
 
 namespace metaagent::media {
 namespace {
@@ -51,66 +57,208 @@ bool fill_metadata(const core::String& path, RgbaImage& image)
 	return true;
 }
 
-bool read_file_bytes(const core::String& path, std::vector<uint8_t>& out_bytes)
+struct MemoryInput {
+	const uint8_t* data = nullptr;
+	size_t size = 0;
+	size_t offset = 0;
+};
+
+int read_memory_packet(void* opaque, uint8_t* buffer, int buffer_size)
 {
-	std::ifstream stream(to_native_path(path), std::ios::binary);
-	if (!stream)
+	auto* input = static_cast<MemoryInput*>(opaque);
+	if (!input || !input->data || buffer_size <= 0)
 	{
-		return false;
+		return AVERROR_EOF;
 	}
 
-	stream.seekg(0, std::ios::end);
-	const std::streamoff size = stream.tellg();
-	if (size <= 0)
+	if (input->offset >= input->size)
 	{
-		return false;
+		return AVERROR_EOF;
 	}
 
-	stream.seekg(0, std::ios::beg);
-	out_bytes.resize(static_cast<size_t>(size));
-	stream.read(reinterpret_cast<char*>(out_bytes.data()), size);
-	return stream.good();
+	const size_t remaining = input->size - input->offset;
+	const size_t to_read = static_cast<size_t>(buffer_size) < remaining
+		? static_cast<size_t>(buffer_size)
+		: remaining;
+	std::memcpy(buffer, input->data + input->offset, to_read);
+	input->offset += to_read;
+	return static_cast<int>(to_read);
 }
 
-bool decode_stbi_pixels(
-	stbi_uc* pixels,
-	const int width,
-	const int height,
-	const int channels,
+int64_t seek_memory_packet(void* opaque, int64_t offset, int whence)
+{
+	auto* input = static_cast<MemoryInput*>(opaque);
+	if (!input)
+	{
+		return AVERROR(EINVAL);
+	}
+
+	switch (whence)
+	{
+	case SEEK_SET:
+		input->offset = offset < 0 ? 0 : static_cast<size_t>(offset);
+		break;
+	case SEEK_CUR:
+		input->offset = static_cast<size_t>(static_cast<int64_t>(input->offset) + offset);
+		break;
+	case SEEK_END:
+		input->offset = static_cast<size_t>(static_cast<int64_t>(input->size) + offset);
+		break;
+	case AVSEEK_SIZE:
+		return static_cast<int64_t>(input->size);
+	default:
+		return AVERROR(EINVAL);
+	}
+
+	if (input->offset > input->size)
+	{
+		input->offset = input->size;
+	}
+
+	return static_cast<int64_t>(input->offset);
+}
+
+bool frame_to_rgba(AVFrame* frame, RgbaImage& out_image)
+{
+	if (!frame || frame->width <= 0 || frame->height <= 0)
+	{
+		return false;
+	}
+
+	SwsContext* scaler = sws_getContext(
+		frame->width,
+		frame->height,
+		static_cast<AVPixelFormat>(frame->format),
+		frame->width,
+		frame->height,
+		AV_PIX_FMT_RGBA,
+		SWS_BILINEAR,
+		nullptr,
+		nullptr,
+		nullptr);
+	if (!scaler)
+	{
+		return false;
+	}
+
+	out_image.width = frame->width;
+	out_image.height = frame->height;
+	out_image.metadata.width = frame->width;
+	out_image.metadata.height = frame->height;
+	out_image.metadata.channel_count = 4;
+	out_image.pixels.resize(static_cast<size_t>(frame->width * frame->height));
+
+	uint8_t* destination_data[4] = {reinterpret_cast<uint8_t*>(out_image.pixels.data()), nullptr, nullptr, nullptr};
+	int destination_linesize[4] = {frame->width * 4, 0, 0, 0};
+
+	sws_scale(
+		scaler,
+		frame->data,
+		frame->linesize,
+		0,
+		frame->height,
+		destination_data,
+		destination_linesize);
+
+	sws_freeContext(scaler);
+	return true;
+}
+
+bool decode_first_frame(AVFormatContext* format_context, RgbaImage& out_image, const core::String& source_label)
+{
+	if (!format_context)
+	{
+		return false;
+	}
+
+	const int stream_index = av_find_best_stream(
+		format_context,
+		AVMEDIA_TYPE_VIDEO,
+		-1,
+		-1,
+		nullptr,
+		0);
+	if (stream_index < 0)
+	{
+		return false;
+	}
+
+	AVStream* stream = format_context->streams[stream_index];
+	const AVCodec* codec = avcodec_find_decoder(stream->codecpar->codec_id);
+	if (!codec)
+	{
+		return false;
+	}
+
+	AVCodecContext* codec_context = avcodec_alloc_context3(codec);
+	if (!codec_context)
+	{
+		return false;
+	}
+
+	if (avcodec_parameters_to_context(codec_context, stream->codecpar) < 0)
+	{
+		avcodec_free_context(&codec_context);
+		return false;
+	}
+
+	if (avcodec_open2(codec_context, codec, nullptr) < 0)
+	{
+		avcodec_free_context(&codec_context);
+		return false;
+	}
+
+	AVPacket* packet = av_packet_alloc();
+	AVFrame* frame = av_frame_alloc();
+	bool decoded = false;
+
+	while (!decoded && av_read_frame(format_context, packet) >= 0)
+	{
+		if (packet->stream_index != stream_index)
+		{
+			av_packet_unref(packet);
+			continue;
+		}
+
+		if (avcodec_send_packet(codec_context, packet) >= 0)
+		{
+			while (avcodec_receive_frame(codec_context, frame) >= 0)
+			{
+				decoded = frame_to_rgba(frame, out_image);
+				break;
+			}
+		}
+
+		av_packet_unref(packet);
+		if (decoded)
+		{
+			break;
+		}
+	}
+
+	out_image.metadata.source_path = source_label;
+	av_frame_free(&frame);
+	av_packet_free(&packet);
+	avcodec_free_context(&codec_context);
+	return decoded;
+}
+
+bool decode_from_format_context(
+	AVFormatContext* format_context,
 	RgbaImage& out_image,
 	const core::String& source_label)
 {
-	if (!pixels || width <= 0 || height <= 0 || channels < 1)
+	if (!format_context)
 	{
-		if (pixels)
-		{
-			stbi_image_free(pixels);
-		}
 		return false;
 	}
 
-	out_image.width = width;
-	out_image.height = height;
-	out_image.metadata.width = width;
-	out_image.metadata.height = height;
-	out_image.metadata.channel_count = channels;
-	out_image.metadata.source_path = source_label;
-	out_image.pixels.resize(static_cast<size_t>(width * height));
-
-	const size_t pixel_count = static_cast<size_t>(width * height);
-	for (size_t index = 0; index < pixel_count; ++index)
+	if (avformat_find_stream_info(format_context, nullptr) < 0)
 	{
-		const size_t offset = index * static_cast<size_t>(channels);
-		core::ColorRGBA color;
-		color.r = pixels[offset + 0];
-		color.g = channels > 1 ? pixels[offset + 1] : pixels[offset + 0];
-		color.b = channels > 2 ? pixels[offset + 2] : pixels[offset + 0];
-		color.a = channels > 3 ? pixels[offset + 3] : 255;
-		out_image.pixels[index] = color;
+		return false;
 	}
 
-	stbi_image_free(pixels);
-	return true;
+	return decode_first_frame(format_context, out_image, source_label);
 }
 
 } // namespace
@@ -137,15 +285,21 @@ bool get_file_identity(
 bool decode_image_from_file(const core::String& path, RgbaImage& out_image)
 {
 	out_image = {};
-
-	std::vector<uint8_t> file_bytes;
-	if (!read_file_bytes(path, file_bytes))
+	if (!fill_metadata(path, out_image))
 	{
 		return false;
 	}
 
-	return decode_image_from_memory(file_bytes.data(), file_bytes.size(), out_image, path)
-		&& fill_metadata(path, out_image);
+	AVFormatContext* format_context = nullptr;
+	if (avformat_open_input(&format_context, path.c_str(), nullptr, nullptr) < 0)
+	{
+		out_image = {};
+		return false;
+	}
+
+	const bool decoded = decode_from_format_context(format_context, out_image, path);
+	avformat_close_input(&format_context);
+	return decoded;
 }
 
 bool decode_image_from_memory(
@@ -160,16 +314,45 @@ bool decode_image_from_memory(
 		return false;
 	}
 
-	int width = 0;
-	int height = 0;
-	int channels = 0;
-	stbi_uc* pixels = stbi_load_from_memory(data, static_cast<int>(size), &width, &height, &channels, 4);
-	if (!pixels)
+	MemoryInput memory_input {data, size, 0};
+	constexpr int kAvioBufferSize = 4096;
+	uint8_t* avio_buffer = static_cast<uint8_t*>(av_malloc(kAvioBufferSize));
+	if (!avio_buffer)
 	{
 		return false;
 	}
 
-	return decode_stbi_pixels(pixels, width, height, 4, out_image, source_label);
+	AVIOContext* avio_context = avio_alloc_context(
+		avio_buffer,
+		kAvioBufferSize,
+		0,
+		&memory_input,
+		read_memory_packet,
+		nullptr,
+		seek_memory_packet);
+	if (!avio_context)
+	{
+		av_free(avio_buffer);
+		return false;
+	}
+
+	AVFormatContext* format_context = avformat_alloc_context();
+	if (!format_context)
+	{
+		avio_context_free(&avio_context);
+		return false;
+	}
+
+	format_context->pb = avio_context;
+	if (avformat_open_input(&format_context, "", nullptr, nullptr) < 0)
+	{
+		avformat_free_context(format_context);
+		return false;
+	}
+
+	const bool decoded = decode_from_format_context(format_context, out_image, source_label);
+	avformat_close_input(&format_context);
+	return decoded;
 }
 
 } // namespace metaagent::media

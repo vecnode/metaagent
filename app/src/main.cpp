@@ -44,8 +44,8 @@ namespace {
 
 constexpr std::size_t kMaxRequestBodyBytes = 4 * 1024 * 1024;
 constexpr const char* kAppVersion = "0.1.0";
-constexpr int kWindowWidth = 1280;
-constexpr int kWindowHeight = 800;
+constexpr int kWindowWidth = 1920;
+constexpr int kWindowHeight = 1080;
 
 std::string env_or_default(const char* name, const char* default_value)
 {
@@ -94,7 +94,6 @@ metaagent::app_host::HostConfig load_host_config()
 		"/api/unreal/event");
 	config.default_target_id = env_or_default("METAAGENT_DEFAULT_TARGET_ID", "platform-default");
 	config.extra_targets = env_or_default("METAAGENT_TARGETS", "");
-	config.sequence_target_id = env_or_default("METAAGENT_SEQUENCE_TARGET", "media-player-cpp");
 	return config;
 }
 

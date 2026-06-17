@@ -3,123 +3,97 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>MetaAgent Comms</title>
+  <title>MetaAgent</title>
   <link rel="icon" href="/icons/icon_topbar_small.png" type="image/png">
   <link rel="stylesheet" href="/style.css">
 </head>
 <body>
   <div class="app">
-    <header class="topbar">
-      <div class="brand">
-        <img class="brand-icon" src="/icons/icon_topbar_small.png" width="18" height="18" alt="">
-        <div class="brand-copy">
-          <span class="brand-name">MetaAgent</span>
-          <span class="brand-sub">Signal Brain · Comms Console</span>
+    <header class="app-header">
+      <div class="header-row">
+        <div class="brand">
+          <img class="brand-icon" src="/icons/icon_topbar_small.png" width="18" height="18" alt="">
+          <div class="brand-copy">
+            <span class="brand-name">MetaAgent</span>
+            <span class="brand-sub">Signal Brain</span>
+          </div>
+        </div>
+        <div class="network-badge" id="network-badge">
+          <span class="network-dot" id="network-dot"></span>
+          <span id="network-label">Networking…</span>
         </div>
       </div>
-      <div class="network-badge" id="network-badge">
-        <span class="network-dot" id="network-dot"></span>
-        <span id="network-label">Networking…</span>
-      </div>
+      <nav class="sub-topbar tabs" role="tablist">
+        <button type="button" class="tab active" data-tab="dashboard" role="tab" aria-selected="true">Dashboard</button>
+        <button type="button" class="tab" data-tab="runtimes" role="tab" aria-selected="false">Runtimes</button>
+        <button type="button" class="tab" data-tab="settings" role="tab" aria-selected="false">Settings</button>
+      </nav>
     </header>
 
-    <main class="layout">
-      <section class="panel panel-runtimes">
-        <div class="panel-head">
-          <h2>Library Runtimes</h2>
-          <p class="panel-desc">Portable modules available in metaagent (API remains on HTTP).</p>
-        </div>
-        <ul id="runtime-list" class="runtime-list"></ul>
-      </section>
+    <main class="content">
+      <section id="panel-dashboard" class="panel-view active" role="tabpanel">
+        <div class="layout layout-single">
+          <section class="panel panel-logs">
+            <div class="panel-head">
+              <h2>Comms Log</h2>
+              <p class="panel-desc">Inbound notify and outbound signal deliveries.</p>
+            </div>
+            <ul id="comms-log" class="log"></ul>
+          </section>
 
-      <section class="panel panel-targets">
-        <div class="panel-head">
-          <h2>Targets</h2>
-          <p class="panel-desc">Registered consumers that receive outbound signals.</p>
-        </div>
-        <ul id="target-list" class="target-list"></ul>
-        <form id="target-form" class="inline-form">
-          <input id="target-id" type="text" placeholder="Target id" required>
-          <input id="target-url" type="url" placeholder="http://127.0.0.1:9001/signal" required>
-          <button type="submit" class="btn">Register</button>
-        </form>
-        <div class="network-actions">
-          <button type="button" class="btn btn-accent" id="network-toggle">Networking Engine</button>
-          <span id="network-detail" class="hint"></span>
-        </div>
-      </section>
-
-      <section class="panel panel-signals">
-        <div class="panel-head">
-          <h2>Send Signal</h2>
-          <p class="panel-desc">Typed envelopes delivered over HTTP POST to the selected target.</p>
-        </div>
-        <form id="signal-form" class="signal-form">
-          <div class="field-row">
-            <label class="field-label" for="signal-type">Type</label>
-            <select id="signal-type">
-              <option value="trigger">trigger</option>
-              <option value="command">command</option>
-              <option value="tile">tile</option>
-              <option value="frame_meta">frame_meta</option>
-              <option value="ai_plan">ai_plan</option>
-              <option value="notify">notify</option>
-            </select>
-          </div>
-          <div class="field-row">
-            <label class="field-label" for="signal-target">Target</label>
-            <select id="signal-target"></select>
-          </div>
-          <div class="field-row">
-            <label class="field-label" for="signal-payload">Payload (JSON)</label>
-            <textarea id="signal-payload" rows="4" placeholder='{"name":"play"}'></textarea>
-          </div>
-          <button type="submit" class="btn btn-dark">Send Signal</button>
-          <p id="signal-output" class="hint"></p>
-        </form>
-      </section>
-
-      <section class="panel panel-sequence">
-        <div class="panel-head">
-          <h2>Tile Sequence</h2>
-          <p class="panel-desc">Load an image, split into tiles, emit <code>tile</code> signals to the sequence target.</p>
-        </div>
-        <form id="sequence-load-form" class="sequence-form">
-          <input id="sequence-path" type="text" placeholder="Absolute path to PNG/JPEG">
-          <div class="inline-form">
-            <input id="sequence-cols" type="number" min="1" max="32" value="4" aria-label="Columns">
-            <input id="sequence-rows" type="number" min="1" max="32" value="4" aria-label="Rows">
-            <input id="sequence-target" type="text" placeholder="Target id">
-            <button type="submit" class="btn">Load</button>
-          </div>
-        </form>
-        <div class="sequence-status" id="sequence-status">No sequence loaded.</div>
-        <div class="chip-row">
-          <button type="button" class="chip" data-seq="play">Play</button>
-          <button type="button" class="chip" data-seq="pause">Pause</button>
-          <button type="button" class="chip" data-seq="step">Step</button>
-          <button type="button" class="chip" data-seq="emit">Emit Tile</button>
-          <button type="button" class="chip" data-seq="reset">Reset</button>
+          <section class="panel panel-ai">
+            <details class="ai-details">
+              <summary>AI Assistant</summary>
+              <form id="chat-form" class="stack">
+                <textarea id="chat-input" rows="2" placeholder="Ask Ollama…"></textarea>
+                <button type="submit" class="btn btn-dark">Ask</button>
+                <pre id="chat-output" class="reply"></pre>
+              </form>
+            </details>
+          </section>
         </div>
       </section>
 
-      <section class="panel panel-logs">
-        <div class="panel-head">
-          <h2>Comms Log</h2>
-          <p class="panel-desc">Inbound notify events and outbound signal deliveries.</p>
+      <section id="panel-runtimes" class="panel-view" role="tabpanel" hidden>
+        <div class="layout layout-single">
+          <section class="panel">
+            <div class="panel-head">
+              <h2>Runtime Status</h2>
+              <p class="panel-desc">Green = active in this session. Red = inactive or unavailable.</p>
+            </div>
+            <div class="ue5-toggle-row">
+              <button type="button" class="btn btn-accent" id="ue5-runtimes-toggle">Enable UE5 Runtimes</button>
+            </div>
+            <div id="runtime-sections"></div>
+          </section>
         </div>
-        <ul id="comms-log" class="log"></ul>
       </section>
 
-      <section class="panel panel-ai">
-        <details class="ai-details">
-          <summary>AI Assistant (optional)</summary>
-          <form id="chat-form" class="stack">
-            <textarea id="chat-input" rows="2" placeholder="Ask Ollama…"></textarea>
-            <button type="submit" class="btn btn-dark">Ask</button>
-            <pre id="chat-output" class="reply"></pre>
-          </form>
-        </details>
+      <section id="panel-settings" class="panel-view" role="tabpanel" hidden>
+        <div class="layout layout-single">
+          <section class="panel">
+            <div class="panel-head">
+              <h2>Ollama</h2>
+              <p class="panel-desc">Language model used by the AI assistant on the Dashboard.</p>
+            </div>
+            <div class="ollama-status-row">
+              <span class="status-lamp" id="ollama-lamp"></span>
+              <span id="ollama-status-text">Checking…</span>
+              <button type="button" class="btn" id="ollama-refresh">Refresh</button>
+            </div>
+            <form id="ollama-form" class="ollama-form">
+              <label class="field-label" for="ollama-model">Model</label>
+              <div class="ollama-model-row">
+                <button type="submit" class="btn btn-compact">Apply</button>
+                <select id="ollama-model" required>
+                  <option value="">Refresh to load models…</option>
+                </select>
+              </div>
+            </form>
+            <p id="ollama-url-hint" class="hint"></p>
+            <p id="settings-output" class="hint"></p>
+          </section>
+        </div>
       </section>
     </main>
   </div>

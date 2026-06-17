@@ -5,6 +5,8 @@ set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
+include(cmake/FFmpeg.cmake)
+
 add_library(metaagent STATIC
     metaagent.cpp
 )
@@ -28,6 +30,8 @@ if(MSVC)
 else()
     target_compile_options(metaagent PRIVATE -Wall -Wextra -Wpedantic)
 endif()
+
+metaagent_link_ffmpeg(metaagent)
 
 enable_testing()
 
@@ -118,6 +122,11 @@ option(METAAGENT_BUILD_APP "Build the MetaAgent desktop webview application (app
 if(METAAGENT_BUILD_APP)
     add_subdirectory(app)
 endif()
+
+get_property(_metaagent_targets DIRECTORY PROPERTY BUILDSYSTEM_TARGETS)
+foreach(_metaagent_target ${_metaagent_targets})
+    metaagent_stage_ffmpeg_runtime(${_metaagent_target})
+endforeach()
 
 install(TARGETS metaagent
     EXPORT metaagentTargets

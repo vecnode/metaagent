@@ -25,6 +25,50 @@ core::String particle_pattern_state_name(const particle::PatternState state)
 	}
 }
 
+core::Array<core::String> parse_ollama_model_names(const core::String& tags_json)
+{
+	core::Array<core::String> names;
+	const size_t models_index = tags_json.find("\"models\":");
+	if (models_index == core::String::npos)
+	{
+		return names;
+	}
+
+	size_t cursor = models_index;
+	while (cursor < tags_json.size())
+	{
+		const size_t name_key = tags_json.find("\"name\":", cursor);
+		if (name_key == core::String::npos)
+		{
+			break;
+		}
+
+		const core::String name = net::extract_json_string_field(tags_json, "name", name_key);
+		if (name.empty())
+		{
+			break;
+		}
+
+		bool duplicate = false;
+		for (const core::String& existing : names)
+		{
+			if (existing == name)
+			{
+				duplicate = true;
+				break;
+			}
+		}
+		if (!duplicate)
+		{
+			names.push_back(name);
+		}
+
+		cursor = name_key + 6;
+	}
+
+	return names;
+}
+
 } // namespace
 
 void MetaAgentHost::configure(const HostConfig& config)
@@ -227,9 +271,11 @@ int32_t MetaAgentHost::authoritative_particle_count() const
 void MetaAgentHost::tick(float delta_seconds)
 {
 	std::lock_guard<std::mutex> lock(mutex_);
-	scheduler_.tick_pattern_runtime(delta_seconds, scheduler_callbacks_);
-	scheduler_.tick_state_effects();
-	tick_sequence(delta_seconds);
+	if (ue5_runtimes_enabled_)
+	{
+		scheduler_.tick_pattern_runtime(delta_seconds, scheduler_callbacks_);
+		scheduler_.tick_state_effects();
+	}
 }
 
 session::RuntimeSession& MetaAgentHost::session()
@@ -408,8 +454,7 @@ core::String MetaAgentHost::build_config_json() const
 	stream << net::json_string_field("ollama_model", config_.ollama_model) << ',';
 	stream << net::json_string_field("platform_base_url", config_.platform_base_url) << ',';
 	stream << net::json_string_field("platform_event_endpoint", config_.platform_event_endpoint) << ',';
-	stream << net::json_string_field("default_target_id", config_.default_target_id) << ',';
-	stream << net::json_string_field("sequence_target_id", config_.sequence_target_id);
+	stream << net::json_string_field("default_target_id", config_.default_target_id);
 	stream << '}';
 	return stream.str();
 }
@@ -604,8 +649,7 @@ core::String MetaAgentHost::build_network_status_json() const
 	stream << net::json_bool_field("http_router_bound", session_.http_router_bound) << ',';
 	stream << "\"target_count\":" << signal_router_.list_targets().size() << ',';
 	stream << "\"signal_log_count\":" << signal_router_.log_entries().size() << ',';
-	stream << net::json_string_field("default_target_id", config_.default_target_id) << ',';
-	stream << net::json_string_field("sequence_target_id", config_.sequence_target_id);
+	stream << net::json_string_field("default_target_id", config_.default_target_id);
 	stream << '}';
 	return stream.str();
 }
@@ -613,7 +657,7 @@ core::String MetaAgentHost::build_network_status_json() const
 core::String MetaAgentHost::build_runtime_catalog_json() const
 {
 	std::lock_guard<std::mutex> lock(mutex_);
-	return app::build_runtime_catalog_json(session_);
+	return app::build_runtime_catalog_json(session_, ue5_runtimes_enabled_);
 }
 
 core::String MetaAgentHost::build_targets_json() const
@@ -684,168 +728,89 @@ core::String MetaAgentHost::build_signal_log_json() const
 	return net::build_signal_log_json(signal_router_.log_entries());
 }
 
-core::String MetaAgentHost::build_sequence_status_json() const
+core::String MetaAgentHost::build_ollama_status_json()
 {
 	std::lock_guard<std::mutex> lock(mutex_);
-	return media::build_tile_sequence_status_json(tile_sequencer_.status());
-}
 
-core::String MetaAgentHost::sequence_load(const core::String& body)
-{
-	std::lock_guard<std::mutex> lock(mutex_);
-	const core::String path = net::extract_json_string_field(body, "path");
-	const core::String columns_text = net::extract_json_string_field(body, "columns");
-	const core::String rows_text = net::extract_json_string_field(body, "rows");
+	core::String tags_url = config_.ollama_url;
+	while (!tags_url.empty() && tags_url.back() == '/')
+	{
+		tags_url.pop_back();
+	}
+	tags_url += "/api/tags";
 
-	int32_t columns = 4;
-	int32_t rows = 4;
-	if (!columns_text.empty())
-	{
-		columns = std::stoi(columns_text);
-	}
-	else
-	{
-		const size_t columns_key = body.find("\"columns\":");
-		if (columns_key != core::String::npos)
-		{
-			columns = std::stoi(body.substr(columns_key + 10));
-		}
-	}
-	if (!rows_text.empty())
-	{
-		rows = std::stoi(rows_text);
-	}
-	else
-	{
-		const size_t rows_key = body.find("\"rows\":");
-		if (rows_key != core::String::npos)
-		{
-			rows = std::stoi(body.substr(rows_key + 7));
-		}
-	}
-
-	const core::String target = net::extract_json_string_field(body, "target");
-	if (!target.empty())
-	{
-		config_.sequence_target_id = target;
-	}
-
-	last_sequence_tile_sent_ = -1;
-	const bool loaded = tile_sequencer_.load_image(path, columns, rows);
-	const media::TileSequenceStatus status = tile_sequencer_.status();
+	int32_t status_code = 0;
+	core::String response_body;
+	const bool transport_ok = tools::sync_http_get(tags_url, status_code, response_body);
+	const bool online = config_.enable_ai && transport_ok && status_code >= 200 && status_code < 300;
+	const core::Array<core::String> models =
+		online ? parse_ollama_model_names(response_body) : core::Array<core::String> {};
 
 	std::ostringstream stream;
 	stream << '{';
-	stream << net::json_bool_field("success", loaded) << ',';
-	stream << net::json_string_field("message",
-		loaded ? "Sequence loaded." : status.error_message) << ',';
-	stream << net::json_string_field("target", config_.sequence_target_id);
-	stream << '}';
+	stream << net::json_bool_field("ai_enabled", config_.enable_ai) << ',';
+	stream << net::json_string_field("ollama_url", config_.ollama_url) << ',';
+	stream << net::json_string_field("model", config_.ollama_model) << ',';
+	stream << net::json_bool_field("online", online) << ',';
+	stream << "\"status_code\":" << status_code << ',';
+	stream << "\"models\":[";
+	for (size_t index = 0; index < models.size(); ++index)
+	{
+		if (index > 0)
+		{
+			stream << ',';
+		}
+		stream << '"' << net::escape_json_string(models[index]) << '"';
+	}
+	stream << "]}";
 	return stream.str();
 }
 
-core::String MetaAgentHost::sequence_control(const core::String& action)
+core::String MetaAgentHost::update_ollama_config(const core::String& body)
 {
 	std::lock_guard<std::mutex> lock(mutex_);
-	std::ostringstream stream;
-	stream << '{';
-
-	if (action == "play")
+	const core::String model = net::extract_json_string_field(body, "model");
+	if (model.empty())
 	{
-		tile_sequencer_.play();
-		emit_current_tile_signal();
-		stream << net::json_bool_field("success", true) << ',';
-		stream << net::json_string_field("message", "Sequence playing.");
-	}
-	else if (action == "pause")
-	{
-		tile_sequencer_.pause();
-		stream << net::json_bool_field("success", true) << ',';
-		stream << net::json_string_field("message", "Sequence paused.");
-	}
-	else if (action == "step")
-	{
-		const bool emitted = emit_current_tile_signal();
-		if (!tile_sequencer_.step_forward())
-		{
-			stream << net::json_bool_field("success", emitted) << ',';
-			stream << net::json_string_field("message",
-				emitted ? "Final tile sent." : tile_sequencer_.status().error_message);
-		}
-		else
-		{
-			stream << net::json_bool_field("success", true) << ',';
-			stream << net::json_string_field("message", "Tile sent and sequence advanced.");
-		}
-	}
-	else if (action == "reset")
-	{
-		tile_sequencer_.reset();
-		last_sequence_tile_sent_ = -1;
-		stream << net::json_bool_field("success", true) << ',';
-		stream << net::json_string_field("message", "Sequence reset.");
-	}
-	else if (action == "emit")
-	{
-		const bool emitted = emit_current_tile_signal();
-		stream << net::json_bool_field("success", emitted) << ',';
-		stream << net::json_string_field("message", emitted ? "Tile signal sent." : "Unable to emit tile.");
-	}
-	else
-	{
-		stream << net::json_bool_field("success", false) << ',';
-		stream << net::json_string_field("message", "Unknown sequence action.");
+		return "{"
+			+ net::json_bool_field("success", false) + ","
+			+ net::json_string_field("message", "Missing model field.")
+			+ "}";
 	}
 
-	stream << '}';
-	return stream.str();
+	config_.ollama_model = model;
+	if (config_.enable_ai)
+	{
+		ai::OllamaConfig ollama_config;
+		ollama_config.base_url = config_.ollama_url;
+		ollama_config.model = config_.ollama_model;
+		ollama_config.enabled = true;
+		language_ai_.set_ollama_config(ollama_config);
+	}
+
+	return "{"
+		+ net::json_bool_field("success", true) + ","
+		+ net::json_string_field("model", config_.ollama_model)
+		+ "}";
 }
 
-void MetaAgentHost::tick_sequence(const float delta_seconds)
+core::String MetaAgentHost::set_ue5_runtimes_enabled(const core::String& body)
 {
-	const media::TileSequenceState previous_state = tile_sequencer_.status().state;
-	tile_sequencer_.tick(delta_seconds);
-
-	if (tile_sequencer_.status().state == media::TileSequenceState::Playing
-		&& tile_sequencer_.status().current_index != last_sequence_tile_sent_)
+	std::lock_guard<std::mutex> lock(mutex_);
+	bool enabled = false;
+	if (!net::extract_json_bool_field(body, "enabled", enabled))
 	{
-		emit_current_tile_signal();
+		return "{"
+			+ net::json_bool_field("success", false) + ","
+			+ net::json_string_field("message", "Missing enabled field.")
+			+ "}";
 	}
 
-	if (previous_state == media::TileSequenceState::Playing
-		&& tile_sequencer_.status().state == media::TileSequenceState::Complete)
-	{
-		net::SignalEnvelope envelope;
-		envelope.type = "trigger";
-		envelope.target = config_.sequence_target_id;
-		envelope.id = "seq-complete";
-		envelope.payload_json = "{" + net::json_string_field("name", "sequence_complete") + "}";
-		send_signal(envelope);
-	}
-}
-
-bool MetaAgentHost::emit_current_tile_signal()
-{
-	const media::TileSequenceStatus status = tile_sequencer_.status();
-	if (status.state == media::TileSequenceState::Idle || status.total_tiles <= 0)
-	{
-		return false;
-	}
-
-	const int32_t tile_index = (status.current_index < status.total_tiles)
-		? status.current_index
-		: status.total_tiles - 1;
-
-	if (tile_index == last_sequence_tile_sent_
-		&& status.state != media::TileSequenceState::Playing)
-	{
-		return false;
-	}
-
-	net::SignalEnvelope envelope = tile_sequencer_.build_tile_signal(config_.sequence_target_id);
-	const net::SignalDispatchResult result = send_signal(envelope);
-	last_sequence_tile_sent_ = tile_index;
-	return result.success;
+	ue5_runtimes_enabled_ = enabled;
+	return "{"
+		+ net::json_bool_field("success", true) + ","
+		+ net::json_bool_field("ue5_runtimes_enabled", ue5_runtimes_enabled_)
+		+ "}";
 }
 
 } // namespace metaagent::app_host

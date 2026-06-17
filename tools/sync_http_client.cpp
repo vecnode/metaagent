@@ -161,7 +161,8 @@ bool read_http_response(const NativeSocket socket_handle, int32_t& status_code_o
 
 } // namespace
 
-bool sync_http_post_json(
+bool sync_http_request(
+	const core::String& method,
 	const core::String& url,
 	const core::String& body,
 	int32_t& status_code_out,
@@ -211,12 +212,19 @@ bool sync_http_post_json(
 		return false;
 	}
 
-	core::String request = "POST " + parsed.path + " HTTP/1.1\r\n";
+	core::String request = method + " " + parsed.path + " HTTP/1.1\r\n";
 	request += "Host: " + parsed.host + "\r\n";
-	request += "Content-Type: application/json\r\n";
 	request += "Connection: close\r\n";
-	request += "Content-Length: " + std::to_string(body.size()) + "\r\n\r\n";
-	request += body;
+	if (method == "POST")
+	{
+		request += "Content-Type: application/json\r\n";
+		request += "Content-Length: " + std::to_string(body.size()) + "\r\n";
+	}
+	request += "\r\n";
+	if (method == "POST")
+	{
+		request += body;
+	}
 
 	const char* data = request.c_str();
 	size_t remaining = request.size();
@@ -235,6 +243,23 @@ bool sync_http_post_json(
 	const bool ok = read_http_response(client_socket, status_code_out, response_body_out);
 	close_socket(client_socket);
 	return ok;
+}
+
+bool sync_http_post_json(
+	const core::String& url,
+	const core::String& body,
+	int32_t& status_code_out,
+	core::String& response_body_out)
+{
+	return sync_http_request("POST", url, body, status_code_out, response_body_out);
+}
+
+bool sync_http_get(
+	const core::String& url,
+	int32_t& status_code_out,
+	core::String& response_body_out)
+{
+	return sync_http_request("GET", url, {}, status_code_out, response_body_out);
 }
 
 } // namespace metaagent::tools

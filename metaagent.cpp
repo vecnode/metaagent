@@ -6,13 +6,12 @@
 #include "core/types.cpp"
 #include "core/math.cpp"
 #include "core/log_sink.cpp"
-#include "core/base64.cpp"
 
 #include "media/decode.cpp"
+#include "media/probe.cpp"
 #include "media/store.cpp"
 #include "media/pipeline.cpp"
 #include "media/mask_cache.cpp"
-#include "media/tile_sequencer.cpp"
 
 #include "camera/types.cpp"
 #include "camera/rig.cpp"

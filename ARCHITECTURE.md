@@ -1,4 +1,4 @@
-# metaagent — Architecture
+# metaagent - Architecture
 
 Portable C++17 library for MetaAgent **domain logic**: particle pattern mechanics, camera rig math, media/mask pipeline, HTTP route handlers, session snapshots, command validation, and input policy. Unreal (or another host) supplies I/O, rendering, and engine APIs through thin bridges.
 
@@ -6,12 +6,14 @@ Portable C++17 library for MetaAgent **domain logic**: particle pattern mechanic
 
 ## Design goals
 
-| Goal | How |
-|------|-----|
-| Portability | C++17, `metaagent::core::*` value types (no `FVector` / `FString`) |
+
+| Goal                   | How                                                                                                                    |
+| ---------------------- | ---------------------------------------------------------------------------------------------------------------------- |
+| Portability            | C++17, `metaagent::core::`* value types (no `FVector` / `FString`)                                                     |
 | Single source of truth | FSM, solvers, phase curves, actuation compose, scheduler, shape/mask algorithms, camera pose math, HTTP handler bodies |
-| Testability | CMake + unit tests without the editor |
-| Engine bridge | Host converts types and supplies I/O callbacks (Niagara, PNG, world queries, HTTPServer bind, view-target blend) |
+| Testability            | CMake + unit tests without the editor                                                                                  |
+| Engine bridge          | Host converts types and supplies I/O callbacks (Niagara, PNG, world queries, HTTPServer bind, view-target blend)       |
+
 
 **Rule of thumb:** if it touches Epic APIs, Niagara, the viewport, or runtime filesystem I/O, it stays in the host. If it is pure state + math + JSON + validation, it belongs in core.
 
@@ -45,16 +47,20 @@ flowchart TB
     UE --> H
 ```
 
+
+
 ### Host integration seams
 
-| Seam | Status |
-|------|--------|
-| **Visual pose** | **Done** — `DisplayedPose`, `freeze_displayed_pose()`, `apply_visual_continuity_for_transition()` |
-| **Particle I/O** | **Done** — `ParticleHostCallbacks` on `SchedulerCallbacks::particle_host` |
-| **Shape / mask** | Core algorithms + UE async cache; host supplies PNG load |
-| **Representation delivery** | Core policy + UE driver registry |
-| **Commands / GUI** | **Done** — catalog + validation; AI + Recording panel rows |
-| **Session snapshot** | Planned — extend `/health` with particle FSM summary |
+
+| Seam                        | Status                                                                                            |
+| --------------------------- | ------------------------------------------------------------------------------------------------- |
+| **Visual pose**             | **Done** — `DisplayedPose`, `freeze_displayed_pose()`, `apply_visual_continuity_for_transition()` |
+| **Particle I/O**            | **Done** — `ParticleHostCallbacks` on `SchedulerCallbacks::particle_host`                         |
+| **Shape / mask**            | Core algorithms + UE async cache; host supplies PNG load                                          |
+| **Representation delivery** | Core policy + UE driver registry                                                                  |
+| **Commands / GUI**          | **Done** — catalog + validation; AI + Recording panel rows                                        |
+| **Session snapshot**        | Planned — extend `/health` with particle FSM summary                                              |
+
 
 ---
 
@@ -91,34 +97,38 @@ Public entry point: `#include <metaagent/metaagent.h>`.
 
 ## What lives in core vs the UE host
 
-| Area | In `metaagent` (portable) | Stays in UE plugin (host) |
-|------|---------------------------|---------------------------|
-| **Particles** | FSM, scheduler, actuation, solvers, shape/mask math, state effects | Niagara buffers, direct capture, orchestrator UX, UObject runtime |
-| **Camera** | Orbit pose, sway, zoom, `CameraController` | `SetViewTargetWithBlend`, focus queries, observation lock |
-| **HTTP inbound** | `/health`, `/echo`, `/notify` handlers + router | Epic `HTTPServer` bind/listen |
-| **HTTP outbound** | URL/body build + response parse | Async POST transport (`FHttpModule`) |
-| **Session / commands** | `RuntimeSession`, `validate_command`, `validate_gui_action` | Key binds, HUD draw, dispatch |
-| **Input policy** | `policy_for_runtime()` | Enhanced Input, mouse hit-test |
-| **GUI panel** | `gui_catalog`, action validation | Canvas draw, click regions |
+
+| Area                   | In `metaagent` (portable)                                          | Stays in UE plugin (host)                                         |
+| ---------------------- | ------------------------------------------------------------------ | ----------------------------------------------------------------- |
+| **Particles**          | FSM, scheduler, actuation, solvers, shape/mask math, state effects | Niagara buffers, direct capture, orchestrator UX, UObject runtime |
+| **Camera**             | Orbit pose, sway, zoom, `CameraController`                         | `SetViewTargetWithBlend`, focus queries, observation lock         |
+| **HTTP inbound**       | `/health`, `/echo`, `/notify` handlers + router                    | Epic `HTTPServer` bind/listen                                     |
+| **HTTP outbound**      | URL/body build + response parse                                    | Async POST transport (`FHttpModule`)                              |
+| **Session / commands** | `RuntimeSession`, `validate_command`, `validate_gui_action`        | Key binds, HUD draw, dispatch                                     |
+| **Input policy**       | `policy_for_runtime()`                                             | Enhanced Input, mouse hit-test                                    |
+| **GUI panel**          | `gui_catalog`, action validation                                   | Canvas draw, click regions                                        |
+
 
 ---
 
 ## Particle domain (`metaagent/particle/`)
 
-| Module | Key API | Role |
-|--------|---------|------|
-| `pattern_types` | `PatternConfig`, `PatternRuntime` | FSM state, buffers, curve samples |
-| `transition_graph` | `TransitionGraph` | Declarative FSM table |
-| `scheduler` | `ParticleScheduler`, `SchedulerCallbacks` | Tick, transitions, representation frame, **visual continuity via `particle_host`** |
-| `visual_continuity` | `DisplayedPose`, `freeze_displayed_pose()` | Per-edge pose freeze using displayed (on-screen) positions |
-| `forming_solver` | `FormingSolverRegistry` | Per-particle forming / return motion |
-| `actuation_math` | `ActuationMath` | Phase evaluation, position composition |
-| `representation_actuation` | `RepresentationActuationPolicy` | Direct / Parameters / Hybrid delivery |
-| `representation_types` | `RepresentationMapping` | Macro phase from pattern state |
-| `shape_builder` | `ShapeBuilder` | Targets, frames, silhouette assignment |
-| `image_mask_processor` | `image_mask::build_mask_from_rgba` | Mask + stratified scatter |
-| `state_effects` | `StateEffectStack` | Ambient breathing + optional cohesion/turbulence |
-| `effect_catalog` | GUI particle action specs | Load preview vs trigger effect ID |
+
+| Module                     | Key API                                    | Role                                                                               |
+| -------------------------- | ------------------------------------------ | ---------------------------------------------------------------------------------- |
+| `pattern_types`            | `PatternConfig`, `PatternRuntime`          | FSM state, buffers, curve samples                                                  |
+| `transition_graph`         | `TransitionGraph`                          | Declarative FSM table                                                              |
+| `scheduler`                | `ParticleScheduler`, `SchedulerCallbacks`  | Tick, transitions, representation frame, **visual continuity via `particle_host`** |
+| `visual_continuity`        | `DisplayedPose`, `freeze_displayed_pose()` | Per-edge pose freeze using displayed (on-screen) positions                         |
+| `forming_solver`           | `FormingSolverRegistry`                    | Per-particle forming / return motion                                               |
+| `actuation_math`           | `ActuationMath`                            | Phase evaluation, position composition                                             |
+| `representation_actuation` | `RepresentationActuationPolicy`            | Direct / Parameters / Hybrid delivery                                              |
+| `representation_types`     | `RepresentationMapping`                    | Macro phase from pattern state                                                     |
+| `shape_builder`            | `ShapeBuilder`                             | Targets, frames, silhouette assignment                                             |
+| `image_mask_processor`     | `image_mask::build_mask_from_rgba`         | Mask + stratified scatter                                                          |
+| `state_effects`            | `StateEffectStack`                         | Ambient breathing + optional cohesion/turbulence                                   |
+| `effect_catalog`           | GUI particle action specs                  | Load preview vs trigger effect ID                                                  |
+
 
 ### Pattern FSM
 
@@ -144,6 +154,8 @@ stateDiagram-v2
     Returning --> Idle: step forward / timeout
 ```
 
+
+
 #### Auto full-cycle mode (play full reveal)
 
 Uses anticipating motion while the mask loads.
@@ -157,6 +169,8 @@ stateDiagram-v2
     Holding --> Returning: hold timeout
     Returning --> Idle: return complete
 ```
+
+
 
 ---
 
@@ -207,11 +221,13 @@ void apply_visual_continuity_for_transition(
 
 ## Camera (`metaagent/camera/`)
 
-| Module | Role |
-|--------|------|
-| `types` | `ZoomSettings`, `CinematicSettings`, `CinematicRuntimeState`, `FocusTarget`, `CinematicStyle` |
-| `rig` | `compute_cinematic_pose`, zoom, focus-from-bounds |
-| `controller` | Per-session `CameraController`: enable/disable cinematic, tick pose, zoom |
+
+| Module       | Role                                                                                          |
+| ------------ | --------------------------------------------------------------------------------------------- |
+| `types`      | `ZoomSettings`, `CinematicSettings`, `CinematicRuntimeState`, `FocusTarget`, `CinematicStyle` |
+| `rig`        | `compute_cinematic_pose`, zoom, focus-from-bounds                                             |
+| `controller` | Per-session `CameraController`: enable/disable cinematic, tick pose, zoom                     |
+
 
 Styles: `OscillatingHold` (sway + hold), `SlowOrbit` (continuous yaw). Cycle via **V** or GUI.
 
@@ -221,34 +237,38 @@ Focus resolution (particle bounds, locked observation target) remains host-side 
 
 ## App / session / net / input
 
-| Module | Role |
-|--------|------|
-| `session/types` | `RuntimeSession`, `FeatureFlags` |
-| `app/commands` | `CommandId`, parse + validate |
-| `app/gui_catalog` | Panel sections, rows, action IDs |
-| `app/gui_actions` | GUI action string IDs → commands |
-| `input/policy` | Block move/look in observation mode; allow wheel zoom when GUI closed |
-| `net/router` + `handlers` | `/health`, `/echo`, `/notify` |
-| `net/platform_client` | Outbound platform POST build/parse |
-| `runtime/host_interfaces` | Recording + AI snapshots/toggles; **ParticleHostCallbacks** |
+
+| Module                    | Role                                                                  |
+| ------------------------- | --------------------------------------------------------------------- |
+| `session/types`           | `RuntimeSession`, `FeatureFlags`                                      |
+| `app/commands`            | `CommandId`, parse + validate                                         |
+| `app/gui_catalog`         | Panel sections, rows, action IDs                                      |
+| `app/gui_actions`         | GUI action string IDs → commands                                      |
+| `input/policy`            | Block move/look in observation mode; allow wheel zoom when GUI closed |
+| `net/router` + `handlers` | `/health`, `/echo`, `/notify`                                         |
+| `net/platform_client`     | Outbound platform POST build/parse                                    |
+| `runtime/host_interfaces` | Recording + AI snapshots/toggles; **ParticleHostCallbacks**           |
+
 
 ---
 
 ## UE plugin split
 
-| Plugin path | Role |
-|-------------|------|
-| `MetaAgentCoreAggregate.cpp` | Embeds `metaagent/metaagent.cpp` |
-| `MetaAgentTypeBridge.*` | UE ↔ core conversion, scheduler bridge, camera sync |
-| `MetaAgentParticleRuntime.*` | UObject instance, Niagara tick glue, **ReadDisplayedPose / ApplyHostWorldPositions** |
-| `MetaAgentParticleControl.*` | Orchestrator, drivers, Niagara profiles |
-| `MetaAgentParticleShapes.*` | PNG load, mask cache, shape providers |
-| `MetaAgentPlayerController.*` | Input, camera host, GUI dispatch, **host service snapshots** |
-| `Host/MetaAgentHttpBridge.*` | Inbound HTTP |
-| `Host/MetaAgentPlatformBridge.*` | Outbound HTTP |
-| `Host/MetaAgentHostSession.*` | Session snapshot |
-| `Host/MetaAgentInputBridge.*` | Command / GUI validation |
-| `Host/MetaAgentHostServicesBridge.*` | `HostServiceCallbacks` → recording + AI |
+
+| Plugin path                          | Role                                                                                 |
+| ------------------------------------ | ------------------------------------------------------------------------------------ |
+| `MetaAgentCoreAggregate.cpp`         | Embeds `metaagent/metaagent.cpp`                                                     |
+| `MetaAgentTypeBridge.`*              | UE ↔ core conversion, scheduler bridge, camera sync                                  |
+| `MetaAgentParticleRuntime.*`         | UObject instance, Niagara tick glue, **ReadDisplayedPose / ApplyHostWorldPositions** |
+| `MetaAgentParticleControl.`*         | Orchestrator, drivers, Niagara profiles                                              |
+| `MetaAgentParticleShapes.*`          | PNG load, mask cache, shape providers                                                |
+| `MetaAgentPlayerController.*`        | Input, camera host, GUI dispatch, **host service snapshots**                         |
+| `Host/MetaAgentHttpBridge.`*         | Inbound HTTP                                                                         |
+| `Host/MetaAgentPlatformBridge.*`     | Outbound HTTP                                                                        |
+| `Host/MetaAgentHostSession.*`        | Session snapshot                                                                     |
+| `Host/MetaAgentInputBridge.*`        | Command / GUI validation                                                             |
+| `Host/MetaAgentHostServicesBridge.*` | `HostServiceCallbacks` → recording + AI                                              |
+
 
 ---
 
@@ -265,30 +285,34 @@ flowchart LR
     Client --> Epic --> Bridge --> Router --> Handlers
 ```
 
+
+
 Outbound: core `platform_client` builds/parses; `FMetaAgentPlatformBridge` performs async POST.
 
 ---
 
 ## Roadmap
 
-| Phase | Goal | Status |
-|-------|------|--------|
-| A | Particle FSM + actuation in core | Done |
-| B | Inbound HTTP + session/commands in core | Done |
-| C | Host bridges (Http, HostSession, Input) | Done |
-| D | Outbound platform client + PlatformBridge | Done |
-| E | GUI panel catalog + dispatch validation | Done |
-| F | Camera style registry (`SlowOrbit`) | Done |
-| G | Particle effect catalog in core | Done |
-| H | Standalone `metaagent_server` CLI | Done |
-| I | Recording / AI host_interfaces | Done |
-| J | Manual FSM profile (Preparing, no anticipating on `.`) | Done |
-| K | Host-side displayed-pose hold + authoritative count | Done (superseded by L) |
-| **L** | **Core `DisplayedPose` + `freeze_displayed_pose` + continuity tests** | **Done** |
-| M | `ParticleHostCallbacks` on scheduler | Done |
-| N | Wire recording/AI `HostServiceCallbacks` in UE + GUI rows | Done |
-| O | Authoritative count in core `PatternRuntime` | Planned |
-| P | Headless particle simulator (mock host callbacks) for CI | Future |
+
+| Phase | Goal                                                                  | Status                 |
+| ----- | --------------------------------------------------------------------- | ---------------------- |
+| A     | Particle FSM + actuation in core                                      | Done                   |
+| B     | Inbound HTTP + session/commands in core                               | Done                   |
+| C     | Host bridges (Http, HostSession, Input)                               | Done                   |
+| D     | Outbound platform client + PlatformBridge                             | Done                   |
+| E     | GUI panel catalog + dispatch validation                               | Done                   |
+| F     | Camera style registry (`SlowOrbit`)                                   | Done                   |
+| G     | Particle effect catalog in core                                       | Done                   |
+| H     | Standalone `metaagent_server` CLI                                     | Done                   |
+| I     | Recording / AI host_interfaces                                        | Done                   |
+| J     | Manual FSM profile (Preparing, no anticipating on `.`)                | Done                   |
+| K     | Host-side displayed-pose hold + authoritative count                   | Done (superseded by L) |
+| **L** | **Core `DisplayedPose` + `freeze_displayed_pose` + continuity tests** | **Done**               |
+| M     | `ParticleHostCallbacks` on scheduler                                  | Done                   |
+| N     | Wire recording/AI `HostServiceCallbacks` in UE + GUI rows             | Done                   |
+| O     | Authoritative count in core `PatternRuntime`                          | Planned                |
+| P     | Headless particle simulator (mock host callbacks) for CI              | Future                 |
+
 
 ---
 
@@ -303,7 +327,7 @@ cmake --build build
 ctest --test-dir build --output-on-failure
 ```
 
-Tests: `transition_graph_test`, `forming_types_test`, `shape_builder_polyline_test`, `actuation_composer_test`, `media_decode_test`, `camera_rig_test`, `net_handler_test`, `app_command_test`, `gui_actions_test`, `platform_client_test`, `gui_catalog_test`, `effect_catalog_test`, `host_interfaces_test`, `state_effects_test`, **`visual_continuity_test`**.
+Tests: `transition_graph_test`, `forming_types_test`, `shape_builder_polyline_test`, `actuation_composer_test`, `media_decode_test`, `camera_rig_test`, `net_handler_test`, `app_command_test`, `gui_actions_test`, `platform_client_test`, `gui_catalog_test`, `effect_catalog_test`, `host_interfaces_test`, `state_effects_test`, `**visual_continuity_test**`.
 
 ### Unreal
 
@@ -321,4 +345,4 @@ Tests: `transition_graph_test`, `forming_types_test`, `shape_builder_polyline_te
 6. **New FSM transition** — row in `transition_graph.cpp` + case in `apply_visual_continuity_for_transition()` + test in `transition_graph_test.cpp` / `visual_continuity_test.cpp`.
 7. **Visual continuity on new edge** — add branch in `apply_visual_continuity_for_transition()` + assert zero compose delta in `visual_continuity_test`.
 
-Product usage and keyboard controls: repository root [`README.md`](../README.md).
+Product usage and keyboard controls: repository root `[README.md](../README.md)`.

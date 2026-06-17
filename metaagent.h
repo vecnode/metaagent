@@ -17,14 +17,13 @@
 #include "core/log_sink.hpp"
 #include "core/math.hpp"
 #include "core/types.hpp"
-#include "core/base64.hpp"
 
 #include "media/decode.hpp"
 #include "media/image.hpp"
 #include "media/mask_cache.hpp"
 #include "media/pipeline.hpp"
+#include "media/probe.hpp"
 #include "media/store.hpp"
-#include "media/tile_sequencer.hpp"
 
 #include "camera/controller.hpp"
 #include "camera/rig.hpp"
