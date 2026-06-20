@@ -1,8 +1,133 @@
-# Bundled FFmpeg (not committed — see third_party/README.md).
+# Bundled FFmpeg (not committed - see third_party/README.md).
 # LGPL 2.1+: link dynamically (DLL/.so) for commercial use without GPL contagion.
 
-set(METAAGENT_FFMPEG_ROOT "${CMAKE_SOURCE_DIR}/third_party/ffmpeg" CACHE PATH
+set(_METAAGENT_DEFAULT_FFMPEG_ROOT "${CMAKE_SOURCE_DIR}/third_party/ffmpeg")
+if(DEFINED ENV{METAAGENT_FFMPEG_ROOT} AND NOT "$ENV{METAAGENT_FFMPEG_ROOT}" STREQUAL "")
+    set(_METAAGENT_DEFAULT_FFMPEG_ROOT "$ENV{METAAGENT_FFMPEG_ROOT}")
+endif()
+
+set(METAAGENT_FFMPEG_ROOT "${_METAAGENT_DEFAULT_FFMPEG_ROOT}" CACHE PATH
     "Path to FFmpeg prefix (include/, lib/, bin/)")
+
+option(METAAGENT_FFMPEG_AUTO_DOWNLOAD "Automatically download FFmpeg when missing" ON)
+option(METAAGENT_FFMPEG_ALLOW_INSECURE_DOWNLOAD
+    "Retry FFmpeg download without TLS verification when cert validation fails" ON)
+
+if(WIN32)
+    set(_METAAGENT_DEFAULT_FFMPEG_URL
+        "https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-master-latest-win64-lgpl-shared.zip")
+else()
+    set(_METAAGENT_DEFAULT_FFMPEG_URL "")
+endif()
+
+set(METAAGENT_FFMPEG_URL "${_METAAGENT_DEFAULT_FFMPEG_URL}" CACHE STRING
+    "Download URL for prebuilt FFmpeg package (used when METAAGENT_FFMPEG_AUTO_DOWNLOAD=ON)")
+
+set(METAAGENT_FFMPEG_ARCHIVE "${CMAKE_SOURCE_DIR}/third_party/ffmpeg_download.zip" CACHE FILEPATH
+    "Archive path used when downloading FFmpeg")
+
+function(metaagent_resolve_ffmpeg_root base_dir out_var)
+    set(_resolved "")
+
+    if(EXISTS "${base_dir}/include/libavcodec/avcodec.h")
+        set(_resolved "${base_dir}")
+    else()
+        file(GLOB_RECURSE _candidate_headers LIST_DIRECTORIES false
+            "${base_dir}/*/include/libavcodec/avcodec.h")
+        list(LENGTH _candidate_headers _candidate_count)
+        if(_candidate_count GREATER 0)
+            list(GET _candidate_headers 0 _first_header)
+            get_filename_component(_libavcodec_dir "${_first_header}" DIRECTORY)
+            get_filename_component(_include_dir "${_libavcodec_dir}" DIRECTORY)
+            get_filename_component(_resolved "${_include_dir}" DIRECTORY)
+        endif()
+    endif()
+
+    set(${out_var} "${_resolved}" PARENT_SCOPE)
+endfunction()
+
+function(metaagent_ensure_ffmpeg)
+    metaagent_resolve_ffmpeg_root("${METAAGENT_FFMPEG_ROOT}" _resolved_root)
+    if(_resolved_root)
+        if(NOT _resolved_root STREQUAL METAAGENT_FFMPEG_ROOT)
+            set(METAAGENT_FFMPEG_ROOT "${_resolved_root}" CACHE PATH
+                "Path to FFmpeg prefix (include/, lib/, bin/)" FORCE)
+        endif()
+        return()
+    endif()
+
+    if(NOT METAAGENT_FFMPEG_AUTO_DOWNLOAD)
+        message(FATAL_ERROR
+            "FFmpeg not found at ${METAAGENT_FFMPEG_ROOT}\n"
+            "Enable METAAGENT_FFMPEG_AUTO_DOWNLOAD or provide METAAGENT_FFMPEG_ROOT manually.\n"
+            "See third_party/README.md")
+    endif()
+
+    if(NOT WIN32)
+        message(FATAL_ERROR
+            "FFmpeg auto-download is currently configured for Windows prebuilt archives.\n"
+            "Set METAAGENT_FFMPEG_ROOT to a local FFmpeg prefix (include/, lib/, bin/).")
+    endif()
+
+    if(METAAGENT_FFMPEG_URL STREQUAL "")
+        message(FATAL_ERROR
+            "METAAGENT_FFMPEG_URL is empty. Set it to a downloadable FFmpeg archive URL.")
+    endif()
+
+    get_filename_component(_archive_dir "${METAAGENT_FFMPEG_ARCHIVE}" DIRECTORY)
+    file(MAKE_DIRECTORY "${_archive_dir}")
+
+    message(STATUS "FFmpeg not found locally. Downloading from: ${METAAGENT_FFMPEG_URL}")
+    file(DOWNLOAD
+        "${METAAGENT_FFMPEG_URL}"
+        "${METAAGENT_FFMPEG_ARCHIVE}"
+        SHOW_PROGRESS
+        STATUS _dl_status
+        TLS_VERIFY ON)
+
+    list(GET _dl_status 0 _dl_code)
+    list(GET _dl_status 1 _dl_message)
+
+    if(NOT _dl_code EQUAL 0 AND _dl_code EQUAL 60 AND METAAGENT_FFMPEG_ALLOW_INSECURE_DOWNLOAD)
+        message(WARNING
+            "FFmpeg download failed TLS verification (${_dl_message}). Retrying with TLS verification OFF.\n"
+            "Set METAAGENT_FFMPEG_ALLOW_INSECURE_DOWNLOAD=OFF to disable this fallback.")
+        file(DOWNLOAD
+            "${METAAGENT_FFMPEG_URL}"
+            "${METAAGENT_FFMPEG_ARCHIVE}"
+            SHOW_PROGRESS
+            STATUS _dl_status
+            TLS_VERIFY OFF)
+        list(GET _dl_status 0 _dl_code)
+        list(GET _dl_status 1 _dl_message)
+    endif()
+
+    if(NOT _dl_code EQUAL 0)
+        message(FATAL_ERROR
+            "Failed to download FFmpeg (${_dl_code}): ${_dl_message}\n"
+            "URL: ${METAAGENT_FFMPEG_URL}\n"
+            "Try setting METAAGENT_FFMPEG_URL to an internal mirror or pre-populate METAAGENT_FFMPEG_ROOT.")
+    endif()
+
+    file(REMOVE_RECURSE "${CMAKE_SOURCE_DIR}/third_party/ffmpeg")
+    file(MAKE_DIRECTORY "${CMAKE_SOURCE_DIR}/third_party/ffmpeg")
+    file(ARCHIVE_EXTRACT
+        INPUT "${METAAGENT_FFMPEG_ARCHIVE}"
+        DESTINATION "${CMAKE_SOURCE_DIR}/third_party/ffmpeg")
+
+    metaagent_resolve_ffmpeg_root("${CMAKE_SOURCE_DIR}/third_party/ffmpeg" _downloaded_root)
+    if(NOT _downloaded_root)
+        message(FATAL_ERROR
+            "FFmpeg archive extracted but include/libavcodec/avcodec.h was not found.\n"
+            "Check archive layout or set METAAGENT_FFMPEG_ROOT manually.")
+    endif()
+
+    set(METAAGENT_FFMPEG_ROOT "${_downloaded_root}" CACHE PATH
+        "Path to FFmpeg prefix (include/, lib/, bin/)" FORCE)
+    message(STATUS "FFmpeg ready at: ${METAAGENT_FFMPEG_ROOT}")
+endfunction()
+
+metaagent_ensure_ffmpeg()
 
 function(metaagent_link_ffmpeg target)
     if(NOT EXISTS "${METAAGENT_FFMPEG_ROOT}/include/libavcodec/avcodec.h")

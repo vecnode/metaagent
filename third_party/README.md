@@ -4,6 +4,17 @@
 
 MetaAgent uses **FFmpeg** (LGPL 2.1+) for media probe and decode. For commercial software, use **dynamic linking** (DLLs on Windows) — do not statically link GPL-enabled FFmpeg builds.
 
+### Automatic setup (Windows)
+
+When CMake configures and FFmpeg is missing, it automatically downloads a shared FFmpeg package and extracts it under `third_party/ffmpeg/`.
+
+Config knobs:
+
+- `METAAGENT_FFMPEG_AUTO_DOWNLOAD=ON|OFF` (default `ON`)
+- `METAAGENT_FFMPEG_URL=<archive-url>`
+- `METAAGENT_FFMPEG_ROOT=<existing-prefix>`
+- `METAAGENT_FFMPEG_ALLOW_INSECURE_DOWNLOAD=ON|OFF` (default `ON`; retries download with TLS verification disabled when certificate validation fails)
+
 ### Layout
 
 Extract a shared/dev FFmpeg build into:

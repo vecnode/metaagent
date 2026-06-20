@@ -20,10 +20,25 @@ Also builds `**metaagent-app**` (WebView desktop host). Pass `-DMETAAGENT_BUILD_
 
 **Windows** — VS 2022 **MSVC** x64, [WebView2 Runtime](https://developer.microsoft.com/microsoft-edge/webview2/)
 
+On first configure, FFmpeg is downloaded automatically into `third_party/ffmpeg/` when missing.
+
 ```powershell
 cmake -B build-msvc -G "Visual Studio 17 2022" -A x64 -DMETAAGENT_BUILD_APP=ON
 cmake --build build-msvc --config Debug -j
 .\build-msvc\app\Debug\metaagent-app.exe
+```
+
+Optional FFmpeg overrides:
+
+```powershell
+# Disable auto-download and use an existing local FFmpeg prefix
+cmake -B build-msvc -G "Visual Studio 17 2022" -A x64 -DMETAAGENT_BUILD_APP=ON -DMETAAGENT_FFMPEG_AUTO_DOWNLOAD=OFF -DMETAAGENT_FFMPEG_ROOT="C:/path/to/ffmpeg"
+
+# Keep auto-download enabled but use a custom archive URL
+cmake -B build-msvc -G "Visual Studio 17 2022" -A x64 -DMETAAGENT_BUILD_APP=ON -DMETAAGENT_FFMPEG_URL="https://.../ffmpeg-win64-shared.zip"
+
+# Disable insecure TLS retry fallback (default is ON)
+cmake -B build-msvc -G "Visual Studio 17 2022" -A x64 -DMETAAGENT_BUILD_APP=ON -DMETAAGENT_FFMPEG_ALLOW_INSECURE_DOWNLOAD=OFF
 ```
 
 Shortcut: `.\app\build_and_run.bat`
@@ -43,9 +58,7 @@ Shortcut: `./app/build_and_run.sh`
 App deps cache (Windows): `%LOCALAPPDATA%\metaagent-app-deps`
 
 
-### Library only (no app)
-
-Builds `metaagent` (static lib), all unit tests, and `metaagent_server` (headless CLI). **Default — app is off.**
+### Library only
 
 **Windows / Linux** (same commands):
 
@@ -164,33 +177,6 @@ flowchart LR
 
 
 
-## What this library is
-
-`metaagent` is the **domain layer** for a multimodal agent runtime. Hosts supply:
-
-- **Desktop app** (`app/`): WebView, httplib server, mock particle I/O, command dispatch
-- **Unreal plugin**: Niagara, viewport, Epic HTTPServer, async HTTP transport
-- Type conversion (`FVector` ↔ `metaagent::core::Vec3`) and asset binding in UE only
-
-Everything that can be expressed as **state + math + validation + JSON** lives here so it can be unit-tested without an editor.
-
-## Layout
-
-```
-metaagent/
-  metaagent.h                 Public umbrella API (single include)
-  metaagent.cpp               Amalgamated implementation
-  src/                        Portable domain modules
-  app/                        Desktop host (WebView + HTTP + mock runtime)
-    public/                   Embedded UI assets
-    src/                      main, MetaAgentHost, HTTP mount
-  tests/                      Standalone unit tests (CMake)
-  tools/                      metaagent_server CLI + transport helpers
-  CMakeLists.txt
-  ARCHITECTURE.md
-```
-
-**UE embed rule:** compile only `metaagent.cpp` inside the plugin module. Never add `app/` or `tools/` sources to the Unreal build.
 
 ## Portable modules
 

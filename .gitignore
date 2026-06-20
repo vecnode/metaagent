@@ -69,3 +69,5 @@ Desktop/Release/
 
 # Bundled FFmpeg binaries (LGPL — local only, not pushed to GitHub)
 third_party/ffmpeg/
+
+*.zip
