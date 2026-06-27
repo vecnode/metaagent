@@ -244,6 +244,11 @@ void mount_metaagent_routes(httplib::Server& server, MetaAgentHost& host)
 		apply_json_body(host.build_process_status_json(), response);
 	});
 
+	server.Get("/api/dataset", [&host](const httplib::Request&, httplib::Response& response)
+	{
+		apply_json_body(host.build_dataset_json(), response);
+	});
+
 	server.Post("/api/media/build", [&host](const httplib::Request&, httplib::Response& response)
 	{
 		apply_json_body(host.build_media_player(), response);

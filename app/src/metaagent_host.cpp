@@ -4,7 +4,10 @@
 
 #include <cmath>
 #include <ctime>
+#include <filesystem>
+#include <fstream>
 #include <iostream>
+#include <map>
 #include <sstream>
 
 namespace metaagent::app_host {
@@ -52,6 +55,108 @@ core::Array<core::String> parse_ollama_model_names(const core::String& tags_json
 	}
 
 	return names;
+}
+
+// Minimal RFC-4180-ish CSV parser: handles quoted fields with embedded commas,
+// newlines, and "" escaped quotes. Returns rows of fields (row 0 = header).
+std::vector<std::vector<core::String>> parse_csv(const core::String& content)
+{
+	std::vector<std::vector<core::String>> rows;
+	std::vector<core::String> row;
+	core::String field;
+	bool in_quotes = false;
+
+	for (size_t i = 0; i < content.size(); ++i)
+	{
+		const char c = content[i];
+		if (in_quotes)
+		{
+			if (c == '"')
+			{
+				if (i + 1 < content.size() && content[i + 1] == '"')
+				{
+					field.push_back('"');
+					++i;
+				}
+				else
+				{
+					in_quotes = false;
+				}
+			}
+			else
+			{
+				field.push_back(c);
+			}
+		}
+		else if (c == '"')
+		{
+			in_quotes = true;
+		}
+		else if (c == ',')
+		{
+			row.push_back(field);
+			field.clear();
+		}
+		else if (c == '\n')
+		{
+			row.push_back(field);
+			field.clear();
+			rows.push_back(row);
+			row.clear();
+		}
+		else if (c != '\r')
+		{
+			field.push_back(c);
+		}
+	}
+	if (!field.empty() || !row.empty())
+	{
+		row.push_back(field);
+		rows.push_back(row);
+	}
+	return rows;
+}
+
+int csv_column_index(const std::vector<core::String>& header, const char* name)
+{
+	for (size_t i = 0; i < header.size(); ++i)
+	{
+		if (header[i] == name)
+		{
+			return static_cast<int>(i);
+		}
+	}
+	return -1;
+}
+
+core::String csv_field(const std::vector<core::String>& row, int index)
+{
+	if (index < 0 || static_cast<size_t>(index) >= row.size())
+	{
+		return core::String {};
+	}
+	return row[index];
+}
+
+core::String preview_text(const core::String& text, size_t max_chars)
+{
+	if (text.size() <= max_chars)
+	{
+		return text;
+	}
+	return text.substr(0, max_chars) + "...";
+}
+
+core::String read_text_file(const core::String& path)
+{
+	std::ifstream file(path, std::ios::binary);
+	if (!file)
+	{
+		return core::String {};
+	}
+	std::ostringstream stream;
+	stream << file.rdbuf();
+	return stream.str();
 }
 
 } // namespace
@@ -287,7 +392,8 @@ core::String MetaAgentHost::build_config_json() const
 	stream << net::json_string_field("media_player_build_command", config_.media_player_build_command) << ',';
 	stream << net::json_string_field("media_player_run_command", config_.media_player_run_command) << ',';
 	stream << net::json_string_field("adapter_project_dir", config_.adapter_project_dir) << ',';
-	stream << net::json_string_field("adapter_launch_command", config_.adapter_launch_command);
+	stream << net::json_string_field("adapter_launch_command", config_.adapter_launch_command) << ',';
+	stream << net::json_string_field("dataset_output_dir", config_.dataset_output_dir);
 	stream << '}';
 	return stream.str();
 }
@@ -801,6 +907,12 @@ core::String MetaAgentHost::update_config(const core::String& body)
 		config_.adapter_launch_command = adapter_launch_command;
 	}
 
+	const core::String dataset_output_dir = net::extract_json_string_field(body, "dataset_output_dir");
+	if (!dataset_output_dir.empty())
+	{
+		config_.dataset_output_dir = dataset_output_dir;
+	}
+
 	if (config_.enable_ai)
 	{
 		ai::OllamaConfig ollama_config;
@@ -822,7 +934,8 @@ core::String MetaAgentHost::update_config(const core::String& body)
 	stream << net::json_string_field("media_player_build_command", config_.media_player_build_command) << ',';
 	stream << net::json_string_field("media_player_run_command", config_.media_player_run_command) << ',';
 	stream << net::json_string_field("adapter_project_dir", config_.adapter_project_dir) << ',';
-	stream << net::json_string_field("adapter_launch_command", config_.adapter_launch_command);
+	stream << net::json_string_field("adapter_launch_command", config_.adapter_launch_command) << ',';
+	stream << net::json_string_field("dataset_output_dir", config_.dataset_output_dir);
 	stream << '}';
 	return stream.str();
 }
@@ -960,6 +1073,170 @@ core::String MetaAgentHost::build_process_status_json()
 		stream << '}';
 	}
 	stream << "]}";
+	return stream.str();
+}
+
+core::String MetaAgentHost::build_dataset_json()
+{
+	core::String dir;
+	{
+		std::lock_guard<std::mutex> lock(mutex_);
+		dir = config_.dataset_output_dir;
+	}
+
+	if (dir.empty())
+	{
+		return "{" + net::json_bool_field("ok", false) + ","
+			+ net::json_string_field("error", "dataset output dir not configured") + "}";
+	}
+
+	namespace fs = std::filesystem;
+	std::error_code ec;
+	if (!fs::is_directory(dir, ec))
+	{
+		return "{" + net::json_bool_field("ok", false) + ","
+			+ net::json_string_field("error", "dataset dir not found") + ","
+			+ net::json_string_field("dataset_dir", dir) + "}";
+	}
+
+	// Find the corpus CSVs by suffix; the dataset prefix (e.g. Release_1_) varies.
+	core::String ocr_path;
+	core::String summaries_path;
+	core::String objs_path;
+	for (const auto& entry : fs::directory_iterator(dir, ec))
+	{
+		if (!entry.is_regular_file())
+		{
+			continue;
+		}
+		const core::String name = entry.path().filename().string();
+		auto ends_with = [&name](const char* suffix)
+		{
+			const core::String suf = suffix;
+			return name.size() >= suf.size()
+				&& name.compare(name.size() - suf.size(), suf.size(), suf) == 0;
+		};
+		if (ocr_path.empty() && ends_with("_OCR.csv"))
+		{
+			ocr_path = entry.path().string();
+		}
+		else if (summaries_path.empty() && ends_with("_SUMMARIES.csv"))
+		{
+			summaries_path = entry.path().string();
+		}
+		else if (objs_path.empty() && ends_with("_OBJS.csv"))
+		{
+			objs_path = entry.path().string();
+		}
+	}
+
+	// image -> summary
+	std::map<core::String, core::String> summary_by_image;
+	if (!summaries_path.empty())
+	{
+		const auto rows = parse_csv(read_text_file(summaries_path));
+		if (!rows.empty())
+		{
+			const int ci_image = csv_column_index(rows[0], "image");
+			const int ci_summary = csv_column_index(rows[0], "summary");
+			for (size_t r = 1; r < rows.size(); ++r)
+			{
+				const core::String image = csv_field(rows[r], ci_image);
+				if (!image.empty())
+				{
+					summary_by_image[image] = csv_field(rows[r], ci_summary);
+				}
+			}
+		}
+	}
+
+	// image -> detected object count
+	std::map<core::String, int> objects_by_image;
+	if (!objs_path.empty())
+	{
+		const auto rows = parse_csv(read_text_file(objs_path));
+		if (!rows.empty())
+		{
+			const int ci_image = csv_column_index(rows[0], "image");
+			for (size_t r = 1; r < rows.size(); ++r)
+			{
+				const core::String image = csv_field(rows[r], ci_image);
+				if (!image.empty())
+				{
+					objects_by_image[image]++;
+				}
+			}
+		}
+	}
+
+	std::ostringstream entries;
+	bool first = true;
+	size_t total = 0;
+	size_t emitted = 0;
+	constexpr size_t kMaxRows = 300;
+
+	if (!ocr_path.empty())
+	{
+		const auto rows = parse_csv(read_text_file(ocr_path));
+		if (!rows.empty())
+		{
+			const int ci_image = csv_column_index(rows[0], "image");
+			const int ci_status = csv_column_index(rows[0], "status");
+			const int ci_text = csv_column_index(rows[0], "text");
+			for (size_t r = 1; r < rows.size(); ++r)
+			{
+				const core::String image = csv_field(rows[r], ci_image);
+				if (image.empty())
+				{
+					continue;
+				}
+				++total;
+				if (emitted >= kMaxRows)
+				{
+					continue;
+				}
+
+				core::String summary;
+				const auto summary_it = summary_by_image.find(image);
+				if (summary_it != summary_by_image.end())
+				{
+					summary = summary_it->second;
+				}
+				int object_count = 0;
+				const auto objects_it = objects_by_image.find(image);
+				if (objects_it != objects_by_image.end())
+				{
+					object_count = objects_it->second;
+				}
+
+				if (!first)
+				{
+					entries << ',';
+				}
+				first = false;
+				entries << '{';
+				entries << net::json_string_field("image", image) << ',';
+				entries << net::json_string_field("status", csv_field(rows[r], ci_status)) << ',';
+				entries << net::json_string_field("ocr_preview", preview_text(csv_field(rows[r], ci_text), 200)) << ',';
+				entries << net::json_string_field("summary_preview", preview_text(summary, 200)) << ',';
+				entries << "\"objects\":" << object_count;
+				entries << '}';
+				++emitted;
+			}
+		}
+	}
+
+	std::ostringstream stream;
+	stream << '{';
+	stream << net::json_bool_field("ok", true) << ',';
+	stream << net::json_string_field("dataset_dir", dir) << ',';
+	stream << net::json_string_field("ocr_csv", ocr_path) << ',';
+	stream << net::json_string_field("summaries_csv", summaries_path) << ',';
+	stream << net::json_string_field("objs_csv", objs_path) << ',';
+	stream << "\"count\":" << total << ',';
+	stream << "\"shown\":" << emitted << ',';
+	stream << "\"entries\":[" << entries.str() << "]";
+	stream << '}';
 	return stream.str();
 }
 

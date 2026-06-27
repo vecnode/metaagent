@@ -10,19 +10,7 @@
 <body>
   <div class="app">
     <header class="app-header">
-      <div class="header-row">
-        <div class="brand">
-          <img class="brand-icon" src="/icons/icon_topbar_small.png" width="18" height="18" alt="">
-          <div class="brand-copy">
-            <span class="brand-name">metaagent</span>
-          </div>
-        </div>
-        <div class="network-badge" id="network-badge">
-          <span class="network-dot" id="network-dot"></span>
-          <span id="network-label">Networking…</span>
-        </div>
-      </div>
-      <nav class="sub-topbar tabs" role="tablist">
+      <nav class="topbar tabs" role="tablist">
         <button type="button" class="tab active" data-tab="dashboard" role="tab" aria-selected="true">Dashboard</button>
         <button type="button" class="tab" data-tab="runtimes" role="tab" aria-selected="false">Runtimes</button>
         <button type="button" class="tab" data-tab="settings" role="tab" aria-selected="false">Settings</button>
@@ -94,6 +82,17 @@
                   <button type="submit" class="btn btn-dark">Summarize</button>
                   <pre id="adapter-output" class="reply"></pre>
                 </form>
+              </details>
+            </section>
+
+            <section class="panel panel-corpus">
+              <details class="ai-details">
+                <summary>Corpus <span id="corpus-count" class="muted"></span></summary>
+                <p class="ai-sub">Dataset structure read from the adapter output CSVs. <span id="corpus-status" class="muted">Set METAAGENT_DATASET_DIR in Settings.</span></p>
+                <div class="media-controls">
+                  <button type="button" class="btn" id="corpus-refresh">Refresh</button>
+                </div>
+                <ul id="corpus-list" class="corpus-list"></ul>
               </details>
             </section>
 
@@ -217,6 +216,13 @@
                     </td>
                     <td><input type="text" id="cfg-adapter-launch" name="adapter_launch_command" placeholder="deploy.bat" spellcheck="false"></td>
                   </tr>
+                  <tr>
+                    <td>
+                      <code>METAAGENT_DATASET_DIR</code>
+                      <span class="env-note">adapter output/ dir with corpus CSVs (OCR/OBJS/SUMMARIES)</span>
+                    </td>
+                    <td><input type="text" id="cfg-dataset-dir" name="dataset_output_dir" placeholder="C:\path\to\UFO_FILES\output" spellcheck="false"></td>
+                  </tr>
                 </tbody>
               </table>
               <div class="endpoints-actions">
@@ -252,6 +258,10 @@
         </div>
       </section>
     </main>
+
+    <footer class="app-footer">
+      <span id="footer-status"></span>
+    </footer>
   </div>
   <script src="/app.js"></script>
 </body>

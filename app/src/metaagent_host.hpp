@@ -29,6 +29,9 @@ struct HostConfig {
 	// pre-training repo deploy/ dir + the uv server launch command (deploy.bat).
 	core::String adapter_project_dir;
 	core::String adapter_launch_command = "deploy.bat";
+	// pre-training output/ dir with the corpus CSVs (*_OCR.csv, *_SUMMARIES.csv,
+	// *_OBJS.csv); metaagent reads these to expose the corpus structure.
+	core::String dataset_output_dir;
 };
 
 class MetaAgentHost {
@@ -73,6 +76,10 @@ public:
 	core::String launch_adapter_server();
 	core::String stop_adapter_server();
 	core::String build_process_status_json();
+
+	// Reads the configured dataset output/ dir CSVs and returns the corpus
+	// structure (image, status, OCR + summary previews, object count).
+	core::String build_dataset_json();
 	core::String set_ue5_runtimes_enabled(const core::String& body);
 
 private:

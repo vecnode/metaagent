@@ -18,6 +18,13 @@ function setHint(id, message, isError = false) {
   el.classList.toggle("error", isError);
 }
 
+function makeEl(tag, className, text) {
+  const node = document.createElement(tag);
+  if (className) node.className = className;
+  if (text != null) node.textContent = text;
+  return node;
+}
+
 function activateTab(name) {
   document.querySelectorAll(".tab").forEach((tab) => {
     const active = tab.dataset.tab === name;
@@ -82,8 +89,6 @@ function formatMediaStatus(status) {
 async function refreshNetwork() {
   const network = await fetchJson("/api/network/status");
   const online = !!network.media_player_online;
-  document.getElementById("network-dot").classList.toggle("online", online);
-  document.getElementById("network-dot").classList.toggle("offline", !online);
 
   const mediaLamp = document.getElementById("media-lamp");
   if (mediaLamp) {
@@ -93,10 +98,6 @@ async function refreshNetwork() {
   }
 
   const url = network.media_player_url || "media player";
-  document.getElementById("network-label").textContent = online
-    ? `Media Player online`
-    : `Media Player offline`;
-  document.getElementById("network-badge").title = url;
 
   const detectLabel = document.getElementById("media-detection-label");
   if (detectLabel) {
@@ -237,6 +238,7 @@ function applyConfigToForm(config) {
     "cfg-media-run": lastConfig.media_player_run_command,
     "cfg-adapter-dir": lastConfig.adapter_project_dir,
     "cfg-adapter-launch": lastConfig.adapter_launch_command,
+    "cfg-dataset-dir": lastConfig.dataset_output_dir,
   };
   for (const [id, value] of Object.entries(fields)) {
     const input = document.getElementById(id);
@@ -250,6 +252,39 @@ function applyConfigToForm(config) {
 async function refreshConfig() {
   const config = await fetchJson("/api/config");
   applyConfigToForm(config);
+}
+
+async function refreshDataset() {
+  const list = document.getElementById("corpus-list");
+  if (!list) return;
+
+  const data = await fetchJson("/api/dataset");
+  const count = document.getElementById("corpus-count");
+  const status = document.getElementById("corpus-status");
+  list.innerHTML = "";
+
+  if (!data.ok) {
+    if (count) count.textContent = "";
+    if (status) status.textContent = data.error || "No dataset configured.";
+    return;
+  }
+
+  if (count) count.textContent = `· ${data.count}`;
+  if (status) {
+    status.textContent = `${data.shown} of ${data.count} pages · ${data.dataset_dir}`;
+  }
+
+  for (const entry of data.entries || []) {
+    const item = makeEl("li", "corpus-item");
+    const head = makeEl("div", "corpus-item-head");
+    head.appendChild(makeEl("span", "corpus-name", entry.image));
+    const meta = (entry.status || "") + (entry.objects ? ` · ${entry.objects} obj` : "");
+    head.appendChild(makeEl("span", "corpus-meta", meta));
+    item.appendChild(head);
+    const preview = entry.summary_preview || entry.ocr_preview || "";
+    if (preview) item.appendChild(makeEl("div", "corpus-preview", preview));
+    list.appendChild(item);
+  }
 }
 
 async function refreshAdapter() {
@@ -476,6 +511,7 @@ document.getElementById("media-run").addEventListener("click", () => postProcess
 document.getElementById("media-process-stop").addEventListener("click", () => postProcess("/api/media/process/stop"));
 document.getElementById("adapter-launch").addEventListener("click", () => postProcess("/api/adapter/launch"));
 document.getElementById("adapter-process-stop").addEventListener("click", () => postProcess("/api/adapter/process/stop"));
+document.getElementById("corpus-refresh").addEventListener("click", refreshDataset);
 
 document.getElementById("ollama-refresh").addEventListener("click", refreshOllama);
 
@@ -505,6 +541,7 @@ document.getElementById("endpoints-form").addEventListener("submit", async (even
     media_player_run_command: document.getElementById("cfg-media-run").value.trim(),
     adapter_project_dir: document.getElementById("cfg-adapter-dir").value.trim(),
     adapter_launch_command: document.getElementById("cfg-adapter-launch").value.trim(),
+    dataset_output_dir: document.getElementById("cfg-dataset-dir").value.trim(),
   };
 
   const result = await fetchJson("/api/config", {
@@ -515,7 +552,7 @@ document.getElementById("endpoints-form").addEventListener("submit", async (even
   if (result.success) {
     applyConfigToForm(result);
     setHint("endpoints-output", "Endpoints applied.", false);
-    await Promise.all([refreshNetwork(), refreshOllama(), refreshAdapter()]);
+    await Promise.all([refreshNetwork(), refreshOllama(), refreshAdapter(), refreshDataset()]);
   } else {
     setHint("endpoints-output", result.message || "Update failed.", true);
   }
@@ -554,6 +591,7 @@ async function refreshAll() {
     refreshConfig(),
     refreshAdapter(),
     refreshProcessStatus(),
+    refreshDataset(),
     refreshCommsLog(),
   ]);
 }

@@ -121,6 +121,7 @@ WebView + local HTTP server + control-panel UI. Serves embedded assets from `app
 | `POST`         | `/api/ollama/config`        | Update Ollama model at runtime                                    |
 | `GET`          | `/api/adapter/status`       | LoRA adapter liveness + device/mode/dtype                         |
 | `POST`         | `/api/adapter/summarize`    | Proxy OCR text → adapter (`{"ocr_text":"…"}` → `{"summary":…}`)   |
+| `GET`          | `/api/dataset`              | Corpus structure from `output/` CSVs (OCR/SUMMARIES/OBJS joined)  |
 
 **Media player coordination** (proxied to media-player-cpp, app #3):
 
@@ -170,6 +171,7 @@ Static assets (`/`, `/style.css`, `/app.js`) are embedded in the executable.
 | `METAAGENT_MEDIA_RUN_CMD`    | `media-player-cpp.exe`   | Media player run binary (launched in project `bin/`)      |
 | `METAAGENT_ADAPTER_DIR`      | empty                    | pre-training `deploy/` dir, for the uv server             |
 | `METAAGENT_ADAPTER_LAUNCH_CMD` | `deploy.bat`           | Adapter server launch command                             |
+| `METAAGENT_DATASET_DIR`      | empty                    | pre-training `output/` dir with corpus CSVs (read by `/api/dataset`) |
 
 All URLs/model/paths above are also editable live from the app's **Settings → Endpoints**
 table (`POST /api/config`), overriding the env var for the running session.
