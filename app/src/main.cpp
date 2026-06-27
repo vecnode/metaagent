@@ -98,6 +98,7 @@ metaagent::app_host::HostConfig load_host_config()
 	config.media_player_run_command = env_or_default("METAAGENT_MEDIA_RUN_CMD", "media-player-cpp.exe");
 	config.adapter_project_dir = env_or_default("METAAGENT_ADAPTER_DIR", "");
 	config.adapter_launch_command = env_or_default("METAAGENT_ADAPTER_LAUNCH_CMD", "deploy.bat");
+	config.dataset_output_dir = env_or_default("METAAGENT_DATASET_DIR", "");
 	return config;
 }
 

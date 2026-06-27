@@ -50,52 +50,10 @@ code {
   flex-shrink: 0;
 }
 
-.header-row {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  padding: 8px 14px 0;
-}
-
-.brand {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  min-width: 0;
-}
-
-.brand-icon {
-  display: block;
-  flex-shrink: 0;
-  border-radius: 4px;
-}
-
-.brand-copy {
-  display: flex;
-  flex-direction: column;
-  min-width: 0;
-}
-
-.brand-name {
-  font-family: var(--font-serif);
-  font-size: 16px;
-  font-weight: 600;
-  letter-spacing: -0.01em;
-  line-height: 1.2;
-}
-
-.brand-sub {
-  font-size: 11px;
-  color: var(--muted);
-}
-
-.sub-topbar {
+.topbar {
   display: flex;
   gap: 2px;
-  padding: 6px 14px 8px;
-  border-top: 1px solid var(--border);
-  margin-top: 8px;
+  padding: 7px 12px;
 }
 
 .tab {
@@ -120,32 +78,16 @@ code {
   background: var(--bg);
 }
 
-.network-badge {
+.app-footer {
+  flex-shrink: 0;
+  height: 22px;
   display: flex;
   align-items: center;
-  gap: 8px;
-  padding: 6px 10px;
-  border: 1px solid var(--border);
-  border-radius: 999px;
-  background: var(--surface-muted);
-  font-size: 11px;
-  font-weight: 600;
-  flex-shrink: 0;
-}
-
-.network-dot {
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  background: #b8b5ae;
-}
-
-.network-dot.online {
-  background: var(--success);
-}
-
-.network-dot.offline {
-  background: var(--danger);
+  padding: 0 12px;
+  border-top: 1px solid var(--border);
+  background: var(--surface);
+  font-size: 10px;
+  color: var(--muted);
 }
 
 .content {
@@ -303,6 +245,53 @@ code {
   align-items: center;
   gap: 10px;
   margin: 8px 0;
+}
+
+.corpus-list {
+  list-style: none;
+  margin: 8px 0 0;
+  padding: 0;
+  max-height: 260px;
+  overflow: auto;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+}
+
+.corpus-item {
+  padding: 5px 9px;
+  border-bottom: 1px solid var(--border);
+}
+
+.corpus-item:last-child {
+  border-bottom: none;
+}
+
+.corpus-item-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.corpus-name {
+  font-family: var(--mono);
+  font-size: 10px;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+.corpus-meta {
+  font-size: 10px;
+  color: var(--muted);
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.corpus-preview {
+  margin-top: 2px;
+  font-size: 10px;
+  color: var(--muted);
+  line-height: 1.3;
+  overflow-wrap: anywhere;
 }
 
 .media-status + .media-status {

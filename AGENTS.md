@@ -177,6 +177,7 @@ The **desktop app** (`app/src/main.cpp`) reads env vars:
 | `METAAGENT_MEDIA_RUN_CMD` | `media-player-cpp.exe` | Media player run binary (launched in project `bin/`) |
 | `METAAGENT_ADAPTER_DIR` | empty | pre-training `deploy/` dir (uv server) |
 | `METAAGENT_ADAPTER_LAUNCH_CMD` | `deploy.bat` | Adapter server launch command |
+| `METAAGENT_DATASET_DIR` | empty | pre-training `output/` dir; corpus CSVs read by `GET /api/dataset` |
 
 **Centralised process control** lives in `app/src/process_manager.{hpp,cpp}`
 (Windows Job Object / POSIX process group, so stop kills the whole tree). The
