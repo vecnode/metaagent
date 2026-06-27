@@ -159,6 +159,14 @@ core::String read_text_file(const core::String& path)
 	return stream.str();
 }
 
+// Strip any directory prefix (CSV image is e.g. "Release_1_PNG\\foo.png", while
+// the media player reports the bare "foo.png").
+core::String base_filename(const core::String& path)
+{
+	const size_t pos = path.find_last_of("/\\");
+	return pos == core::String::npos ? path : path.substr(pos + 1);
+}
+
 } // namespace
 
 void MetaAgentHost::configure(const HostConfig& config)
@@ -724,6 +732,125 @@ core::String MetaAgentHost::proxy_media_player_post(const core::String& path, co
 	return response_body;
 }
 
+void MetaAgentHost::ensure_summaries_loaded()
+{
+	core::String dir;
+	bool need_load = false;
+	{
+		std::lock_guard<std::mutex> lock(mutex_);
+		dir = config_.dataset_output_dir;
+		need_load = !summaries_loaded_ || summaries_loaded_for_dir_ != dir;
+	}
+	if (!need_load)
+	{
+		return;
+	}
+
+	// Build the map outside the lock; parsing the CSV can take a moment.
+	std::map<core::String, core::String> map;
+	if (!dir.empty())
+	{
+		namespace fs = std::filesystem;
+		std::error_code ec;
+		core::String summaries_path;
+		if (fs::is_directory(dir, ec))
+		{
+			for (const auto& entry : fs::directory_iterator(dir, ec))
+			{
+				if (!entry.is_regular_file())
+				{
+					continue;
+				}
+				const core::String name = entry.path().filename().string();
+				const core::String suffix = "_SUMMARIES.csv";
+				if (name.size() >= suffix.size()
+					&& name.compare(name.size() - suffix.size(), suffix.size(), suffix) == 0)
+				{
+					summaries_path = entry.path().string();
+					break;
+				}
+			}
+		}
+
+		if (!summaries_path.empty())
+		{
+			const auto rows = parse_csv(read_text_file(summaries_path));
+			if (!rows.empty())
+			{
+				const int ci_image = csv_column_index(rows[0], "image");
+				const int ci_summary = csv_column_index(rows[0], "summary");
+				for (size_t r = 1; r < rows.size(); ++r)
+				{
+					const core::String image = csv_field(rows[r], ci_image);
+					const core::String summary = csv_field(rows[r], ci_summary);
+					if (!image.empty() && !summary.empty())
+					{
+						map[base_filename(image)] = summary;
+					}
+				}
+			}
+		}
+	}
+
+	std::lock_guard<std::mutex> lock(mutex_);
+	summary_by_basename_ = std::move(map);
+	summaries_loaded_ = true;
+	summaries_loaded_for_dir_ = dir;
+}
+
+void MetaAgentHost::push_subtitle_for_clip(const core::String& clip_name)
+{
+	ensure_summaries_loaded();
+
+	const core::String key = base_filename(clip_name);
+	core::String summary;
+	{
+		std::lock_guard<std::mutex> lock(mutex_);
+		const auto it = summary_by_basename_.find(key);
+		if (it != summary_by_basename_.end())
+		{
+			summary = it->second;
+		}
+	}
+
+	if (summary.empty())
+	{
+		append_app_log("media", "out", "no summary for " + key + " (subtitle left as-is)", false);
+		return;
+	}
+
+	const core::String subtitle_body = "{"
+		+ net::json_string_field("text", summary) + ","
+		+ net::json_bool_field("enabled", true)
+		+ "}";
+	proxy_media_player_post("/api/subtitles", subtitle_body);
+}
+
+core::String MetaAgentHost::media_navigate(const core::String& media_path, const core::String& body)
+{
+	const core::String response = proxy_media_player_post(media_path, body);
+	const core::String clip_name = net::extract_json_string_field(response, "clipName");
+	if (!clip_name.empty())
+	{
+		push_subtitle_for_clip(clip_name);
+	}
+	return response;
+}
+
+core::String MetaAgentHost::sync_media_subtitle()
+{
+	const core::String status = proxy_media_player_get("/api/status");
+	const core::String clip_name = net::extract_json_string_field(status, "clipName");
+	if (clip_name.empty())
+	{
+		return "{" + net::json_bool_field("ok", false) + ","
+			+ net::json_string_field("error", "no current clip") + "}";
+	}
+	push_subtitle_for_clip(clip_name);
+	return "{" + net::json_bool_field("ok", true) + ","
+		+ net::json_string_field("clip", clip_name) + "}";
+}
+
 core::String MetaAgentHost::build_media_control_log_json() const
 {
 	std::lock_guard<std::mutex> lock(mutex_);
@@ -911,6 +1038,8 @@ core::String MetaAgentHost::update_config(const core::String& body)
 	if (!dataset_output_dir.empty())
 	{
 		config_.dataset_output_dir = dataset_output_dir;
+		// Force the subtitle summary map to reload from the new dir.
+		summaries_loaded_ = false;
 	}
 
 	if (config_.enable_ai)

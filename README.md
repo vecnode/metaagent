@@ -136,6 +136,12 @@ WebView + local HTTP server + control-panel UI. Serves embedded assets from `app
 | `POST` | `/api/media/previous`      | `/api/previous`         |
 | `POST` | `/api/media/subtitles`     | `/api/subtitles`        |
 | `POST` | `/api/media/clips/{index}` | `/api/clips/{index}`    |
+| `POST` | `/api/media/subtitle-sync` | push current clip's true summary as its subtitle |
+
+> `next`/`previous`/`clips/{index}` auto-push the **true summary** for the
+> now-current clip (looked up by image basename in the dataset `*_SUMMARIES.csv`)
+> to the media player as its subtitle, so the player never falls back to the
+> filename. Requires `METAAGENT_DATASET_DIR` to be set.
 
 **Centralised process control** (build/run the controlled apps, tracking PID):
 

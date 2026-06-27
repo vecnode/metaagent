@@ -194,12 +194,17 @@ void mount_metaagent_routes(httplib::Server& server, MetaAgentHost& host)
 
 	server.Post("/api/media/next", [&host](const httplib::Request& request, httplib::Response& response)
 	{
-		apply_json_body(host.proxy_media_player_post("/api/next", request.body), response);
+		apply_json_body(host.media_navigate("/api/next", request.body), response);
 	});
 
 	server.Post("/api/media/previous", [&host](const httplib::Request& request, httplib::Response& response)
 	{
-		apply_json_body(host.proxy_media_player_post("/api/previous", request.body), response);
+		apply_json_body(host.media_navigate("/api/previous", request.body), response);
+	});
+
+	server.Post("/api/media/subtitle-sync", [&host](const httplib::Request&, httplib::Response& response)
+	{
+		apply_json_body(host.sync_media_subtitle(), response);
 	});
 
 	server.Post("/api/media/subtitles", [&host](const httplib::Request& request, httplib::Response& response)
@@ -210,7 +215,7 @@ void mount_metaagent_routes(httplib::Server& server, MetaAgentHost& host)
 	server.Post(R"(/api/media/clips/(\d+))", [&host](const httplib::Request& request, httplib::Response& response)
 	{
 		const core::String path = "/api/clips/" + request.matches[1].str();
-		apply_json_body(host.proxy_media_player_post(path, request.body), response);
+		apply_json_body(host.media_navigate(path, request.body), response);
 	});
 
 	server.Get("/api/ollama/status", [&host](const httplib::Request&, httplib::Response& response)
