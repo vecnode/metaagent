@@ -553,6 +553,8 @@ document.getElementById("endpoints-form").addEventListener("submit", async (even
     applyConfigToForm(result);
     setHint("endpoints-output", "Endpoints applied.", false);
     await Promise.all([refreshNetwork(), refreshOllama(), refreshAdapter(), refreshDataset()]);
+    // New dataset dir → refresh the subtitle for the current clip.
+    await syncSubtitle();
   } else {
     setHint("endpoints-output", result.message || "Update failed.", true);
   }
@@ -596,7 +598,13 @@ async function refreshAll() {
   ]);
 }
 
+async function syncSubtitle() {
+  await fetchJson("/api/media/subtitle-sync", { method: "POST" });
+}
+
 refreshAll();
+// Push the true summary for whatever clip is showing on startup.
+syncSubtitle();
 setInterval(refreshNetwork, 5000);
 setInterval(refreshMediaStatus, 5000);
 setInterval(refreshCommsLog, 2500);

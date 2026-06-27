@@ -5,6 +5,7 @@
 #include "process_manager.hpp"
 
 #include <ctime>
+#include <map>
 #include <mutex>
 
 namespace metaagent::app_host {
@@ -59,6 +60,12 @@ public:
 
 	core::String proxy_media_player_get(const core::String& path) const;
 	core::String proxy_media_player_post(const core::String& path, const core::String& body);
+
+	// Navigate the media player (next/previous/open) and push the true summary for
+	// the now-current clip as its subtitle, looked up from the dataset CSV.
+	core::String media_navigate(const core::String& media_path, const core::String& body);
+	// Push the summary for whatever clip is currently displayed.
+	core::String sync_media_subtitle();
 	core::String build_media_control_log_json() const;
 	core::String build_app_log_json() const;
 
@@ -87,6 +94,8 @@ private:
 	void apply_command_side_effects(app::CommandId command);
 
 	core::String build_media_player_url(const core::String& path) const;
+	void ensure_summaries_loaded();
+	void push_subtitle_for_clip(const core::String& clip_name);
 	void append_media_control_log(
 		const core::String& action,
 		const core::String& summary,
@@ -107,6 +116,11 @@ private:
 
 	core::Array<core::String> notify_log_;
 	ProcessManager process_manager_;
+
+	// image basename -> summary, loaded from the dataset *_SUMMARIES.csv.
+	std::map<core::String, core::String> summary_by_basename_;
+	bool summaries_loaded_ = false;
+	core::String summaries_loaded_for_dir_;
 
 	struct MediaControlLogEntry {
 		core::String timestamp;
