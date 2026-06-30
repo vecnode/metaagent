@@ -138,10 +138,14 @@ WebView + local HTTP server + control-panel UI. Serves embedded assets from `app
 | `POST` | `/api/media/clips/{index}` | `/api/clips/{index}`    |
 | `POST` | `/api/media/subtitle-sync` | push current clip's true summary as its subtitle |
 
-> `next`/`previous`/`clips/{index}` auto-push the **true summary** for the
-> now-current clip (looked up by image basename in the dataset `*_SUMMARIES.csv`)
-> to the media player as its subtitle, so the player never falls back to the
-> filename. Requires `METAAGENT_DATASET_DIR` to be set.
+> `next`/`previous`/`clips/{index}` auto-push the summary for the now-current
+> clip (looked up by image basename in the dataset `*_SUMMARIES.csv`) to the
+> media player as its subtitle, so the player never falls back to the filename.
+> The summary is first **condensed via Ollama** (drops filler like "This document
+> outlines…", keeps the key facts; cached per clip, falls back to the raw summary
+> if AI is off or unreachable). Requires `METAAGENT_DATASET_DIR` set, and
+> `METAAGENT_OLLAMA_MODEL` set to an **installed** model (pick one in Settings →
+> Endpoints).
 
 **Centralised process control** (build/run the controlled apps, tracking PID):
 

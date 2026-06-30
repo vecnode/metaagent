@@ -418,7 +418,8 @@ code {
   overflow-wrap: anywhere;
 }
 
-.env-table input {
+.env-table input,
+.env-table select {
   padding: 4px 7px;
   font-size: 11px;
 }

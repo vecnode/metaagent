@@ -244,6 +244,9 @@ function applyConfigToForm(config) {
     const input = document.getElementById(id);
     // Don't clobber a field the user is actively editing.
     if (input && document.activeElement !== input) {
+      if (input.tagName === "SELECT" && value && ![...input.options].some((o) => o.value === value)) {
+        input.appendChild(new Option(value, value));
+      }
       input.value = value || "";
     }
   }
@@ -342,11 +345,29 @@ async function postProcess(path) {
   await refreshCommsLog();
 }
 
+function fillModelSelect(selectId, models, selected) {
+  const select = document.getElementById(selectId);
+  if (!select || document.activeElement === select) return;
+
+  const previous = select.value;
+  const names = models && models.length ? models.slice() : [];
+  if (selected && !names.includes(selected)) names.unshift(selected);
+
+  select.innerHTML = "";
+  if (!names.length) {
+    select.appendChild(new Option(selected || "Refresh to load models…", selected || ""));
+  } else {
+    for (const name of names) select.appendChild(new Option(name, name));
+  }
+
+  if (previous && names.includes(previous)) select.value = previous;
+  else if (selected) select.value = selected;
+}
+
 async function refreshOllama() {
   const status = await fetchJson("/api/ollama/status");
   const lamp = document.getElementById("ollama-lamp");
   const text = document.getElementById("ollama-status-text");
-  const modelSelect = document.getElementById("ollama-model");
   const urlHint = document.getElementById("ollama-url-hint");
 
   if (!status.ai_enabled) {
@@ -366,35 +387,11 @@ async function refreshOllama() {
     modelHint.textContent = status.model || "model";
   }
 
-  if (!modelSelect) return;
-
   const models = status.models || [];
   const selected = status.model || "";
-  const previous = modelSelect.value;
-  modelSelect.innerHTML = "";
-
-  if (!models.length) {
-    const option = document.createElement("option");
-    option.value = selected;
-    option.textContent = selected || "No models found";
-    modelSelect.appendChild(option);
-  } else {
-    for (const name of models) {
-      const option = document.createElement("option");
-      option.value = name;
-      option.textContent = name;
-      if (name === selected) {
-        option.selected = true;
-      }
-      modelSelect.appendChild(option);
-    }
-  }
-
-  if (previous && [...modelSelect.options].some((option) => option.value === previous)) {
-    modelSelect.value = previous;
-  } else if (selected) {
-    modelSelect.value = selected;
-  }
+  // The Ollama panel select and the Settings → Endpoints model dropdown.
+  fillModelSelect("ollama-model", models, selected);
+  fillModelSelect("cfg-ollama-model", models, selected);
 }
 
 async function refreshCommsLog() {
