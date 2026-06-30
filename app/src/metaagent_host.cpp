@@ -798,6 +798,69 @@ void MetaAgentHost::ensure_summaries_loaded()
 	summaries_loaded_for_dir_ = dir;
 }
 
+core::String MetaAgentHost::condense_summary(const core::String& summary)
+{
+	core::String url;
+	core::String model;
+	bool enabled = false;
+	{
+		std::lock_guard<std::mutex> lock(mutex_);
+		url = config_.ollama_url;
+		model = config_.ollama_model;
+		enabled = config_.enable_ai;
+	}
+
+	if (!enabled || url.empty() || model.empty() || summary.empty())
+	{
+		return summary;
+	}
+
+	while (!url.empty() && url.back() == '/')
+	{
+		url.pop_back();
+	}
+
+	const core::String system_prompt =
+		"You rewrite document summaries into a single short subtitle. "
+		"Drop filler openings such as 'This document outlines', 'This page details', "
+		"'This document is', 'This routing sheet', 'The document'. Keep only the essential "
+		"facts (who/what/when/where). Reply with one concise sentence and nothing else - "
+		"no preamble, no quotes, no label.";
+
+	const core::String body = core::String("{")
+		+ "\"model\":\"" + net::escape_json_string(model) + "\","
+		+ "\"stream\":false,"
+		+ "\"messages\":["
+			+ "{\"role\":\"system\",\"content\":\"" + net::escape_json_string(system_prompt) + "\"},"
+			+ "{\"role\":\"user\",\"content\":\"" + net::escape_json_string(summary) + "\"}"
+		+ "]}";
+
+	int32_t status_code = 0;
+	core::String response_body;
+	const bool ok = tools::sync_http_post_json(url + "/api/chat", body, status_code, response_body);
+	if (!ok || status_code < 200 || status_code >= 300)
+	{
+		return summary;
+	}
+
+	core::String condensed = net::extract_json_string_field(response_body, "content");
+
+	// Trim whitespace and any surrounding quotes the model may have added.
+	const auto trim = [](core::String text)
+	{
+		const size_t start = text.find_first_not_of(" \t\r\n\"'");
+		if (start == core::String::npos)
+		{
+			return core::String {};
+		}
+		const size_t end = text.find_last_not_of(" \t\r\n\"'");
+		return text.substr(start, end - start + 1);
+	};
+	condensed = trim(condensed);
+
+	return condensed.empty() ? summary : condensed;
+}
+
 void MetaAgentHost::push_subtitle_for_clip(const core::String& clip_name)
 {
 	ensure_summaries_loaded();
@@ -819,8 +882,28 @@ void MetaAgentHost::push_subtitle_for_clip(const core::String& clip_name)
 		return;
 	}
 
+	// Use the cached condensed subtitle if we already rewrote this clip.
+	core::String text;
+	bool cached = false;
+	{
+		std::lock_guard<std::mutex> lock(mutex_);
+		const auto it = condensed_by_basename_.find(key);
+		if (it != condensed_by_basename_.end())
+		{
+			text = it->second;
+			cached = true;
+		}
+	}
+
+	if (!cached)
+	{
+		text = condense_summary(summary);
+		std::lock_guard<std::mutex> lock(mutex_);
+		condensed_by_basename_[key] = text;
+	}
+
 	const core::String subtitle_body = "{"
-		+ net::json_string_field("text", summary) + ","
+		+ net::json_string_field("text", text) + ","
 		+ net::json_bool_field("enabled", true)
 		+ "}";
 	proxy_media_player_post("/api/subtitles", subtitle_body);
@@ -961,6 +1044,7 @@ core::String MetaAgentHost::update_ollama_config(const core::String& body)
 	}
 
 	config_.ollama_model = model;
+	condensed_by_basename_.clear();
 	if (config_.enable_ai)
 	{
 		ai::OllamaConfig ollama_config;
@@ -984,12 +1068,14 @@ core::String MetaAgentHost::update_config(const core::String& body)
 	if (!ollama_url.empty())
 	{
 		config_.ollama_url = ollama_url;
+		condensed_by_basename_.clear();
 	}
 
 	const core::String ollama_model = net::extract_json_string_field(body, "ollama_model");
 	if (!ollama_model.empty())
 	{
 		config_.ollama_model = ollama_model;
+		condensed_by_basename_.clear();
 	}
 
 	const core::String media_player_base_url = net::extract_json_string_field(body, "media_player_base_url");
@@ -1040,6 +1126,7 @@ core::String MetaAgentHost::update_config(const core::String& body)
 		config_.dataset_output_dir = dataset_output_dir;
 		// Force the subtitle summary map to reload from the new dir.
 		summaries_loaded_ = false;
+		condensed_by_basename_.clear();
 	}
 
 	if (config_.enable_ai)

@@ -96,6 +96,9 @@ private:
 	core::String build_media_player_url(const core::String& path) const;
 	void ensure_summaries_loaded();
 	void push_subtitle_for_clip(const core::String& clip_name);
+	// Rewrites a raw summary into a terse subtitle via Ollama (drops filler like
+	// "This document outlines…"). Returns the raw summary on any failure.
+	core::String condense_summary(const core::String& summary);
 	void append_media_control_log(
 		const core::String& action,
 		const core::String& summary,
@@ -121,6 +124,8 @@ private:
 	std::map<core::String, core::String> summary_by_basename_;
 	bool summaries_loaded_ = false;
 	core::String summaries_loaded_for_dir_;
+	// image basename -> Ollama-condensed subtitle (cleared when model/dataset change).
+	std::map<core::String, core::String> condensed_by_basename_;
 
 	struct MediaControlLogEntry {
 		core::String timestamp;
